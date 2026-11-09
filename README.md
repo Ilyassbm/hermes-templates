@@ -89,6 +89,33 @@ hermes plugins validate .
 node --check desktop/plugin.js
 ```
 
+
+## Screenshots
+
+![Share tab](docs/share-tab.png)
+
+![Install tab](docs/install-tab.png)
+
+## Develop
+
+The plugin is a plain Python package plus one uncompiled ESM file — no build step.
+
+```bash
+# live-edit on the box: point the profile's plugin dir at the checkout, then
+# republish the desktop half the Webapp/Desktop actually reads
+ln -s /path/to/hermes-templates $HERMES_HOME/plugins/hermes-templates
+python -c "from pathlib import Path; from hermes_cli.desktop_plugin_halves import reconcile_desktop_halves_report as r; root=Path('$HERMES_HOME'); r(root, root/'desktop-plugins')"
+```
+
+The Desktop/Webapp half of a unified package starts **disabled** per browser
+(`hermes.desktop.pluginDecisions.v2` in localStorage) — enable it in
+Capabilities ▸ Plugins, or set `{"hermes-templates": true}` before reloading.
+
+`hermes plugins validate .` warns about one import, `agent.redact.redact_sensitive_text`.
+It is listed as public in the current docs (Public plugin API → `agent.redact`);
+the warning comes from an older validator table and disappears on a newer build.
+Removing it would mean shipping our own redactor, which is the worse trade.
+
 ## Layout
 
 ```

@@ -69,7 +69,6 @@ function accentInk() {
   return inkCache
 }
 
-const el = (tag, props, children) => jsx(tag, { ...props, children })
 const box = (props, children) => jsx('div', { ...props, children })
 
 const S = {
