@@ -234,9 +234,11 @@ CONFIG_DROP_SECTIONS = frozenset({
 # Keys whose value is an endpoint or an account, not a behaviour.
 CONFIG_DROP_KEYS = frozenset({"base_url", "api_mode", "api_key", "api_base", "endpoint"})
 
-# ``model.provider`` names the author's account (``opencode-go``, ``nous``…). The
-# template keeps the model *default* as a suggestion, never the account behind it.
-CONFIG_DROP_MODEL_KEYS = frozenset({"provider"})
+# ``model.provider`` is a *name* (``opencode-go``, ``nous``, ``anthropic``), not a
+# credential: keeping it lets the agent run for anyone who has an account there,
+# and Hermes supplies that provider's own endpoint. Only endpoints and keys are
+# dropped, never the provider choice.
+CONFIG_DROP_MODEL_KEYS = frozenset()
 
 
 def sanitize_config(config: dict) -> tuple[dict, list[str]]:

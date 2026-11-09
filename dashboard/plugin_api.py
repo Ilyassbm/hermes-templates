@@ -107,6 +107,7 @@ async def preview(body: dict = _BODY):
             str(body.get("data_base64") or ""),
             str(body.get("filename") or ""),
             name=str(body.get("name") or ""),
+            restricted=True,
         )
     except TemplateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -123,6 +124,7 @@ async def install(body: dict = _BODY):
             name=str(body.get("name") or ""),
             force=bool(body.get("force", False)),
             enable_plugins=bool(body.get("enable_plugins", True)),
+            restricted=True,
         )
     except TemplateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

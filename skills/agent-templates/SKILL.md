@@ -55,7 +55,8 @@ conversation history, `state.db`, logs, caches, workspace, `home/`, key material
 Every text file that does travel passes through Hermes' own secret redactor
 (`agent.redact.redact_sensitive_text`) before it is written into the bundle.
 `config.yaml` additionally loses `platforms`/`messaging`/`gateway`, `base_url`,
-`api_mode`, and `model.provider`: the installer brings their own account.
+`api_mode` and every `api_key`: the provider name stays, its endpoint and
+credentials do not — the installer brings their own account.
 
 ## Desktop
 

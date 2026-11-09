@@ -22,7 +22,7 @@ Desktop: **Templates** appears in the sidebar (`/templates`).
 
 ```bash
 hermes template list
-hermes template create <profile> [-o out.htemplate] [--with-memories] [--skill NAME]…
+hermes template create <profile> [--out out.htemplate] [--with-memories] [--skill NAME]…
 hermes template inspect <file-or-https-link>
 hermes template install <file-or-https-link> [--name NAME] [--force] [-y]
 ```
@@ -42,7 +42,8 @@ hermes template install <file-or-https-link> [--name NAME] [--force] [-y]
 Every text file is passed through Hermes' own secret redactor
 (`agent.redact.redact_sensitive_text`) before it is written into the bundle, and
 `config.yaml` also loses `platforms`, `messaging`, `gateway`, `base_url`,
-`api_mode` and `model.provider`.
+`api_mode` and every `api_key` — the provider *name* stays, its endpoint and
+credentials do not.
 
 ## Why a bundle and not a profile export
 

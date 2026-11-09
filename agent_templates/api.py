@@ -81,19 +81,29 @@ def create(
     return payload
 
 
-def resolve_source(home: Path, source: str = "", data_base64: str = "", filename: str = "") -> Path:
-    """A link, a path, or bytes from a drag and drop — always a file on disk."""
+def resolve_source(
+    home: Path, source: str = "", data_base64: str = "", filename: str = "", *, restricted: bool = False
+) -> Path:
+    """A link, a path, or bytes from a drag and drop — always a file on disk.
+
+    ``restricted`` is what the page passes: a browser request may only name a
+    file inside the Hermes home or the user's home. The CLI passes nothing —
+    the person typing the command already owns the file.
+    """
     if data_base64:
         try:
             raw = base64.b64decode(data_base64.split(",")[-1], validate=True)
         except Exception as exc:
             raise TemplateError(f"upload is not valid base64: {exc}") from exc
         return store.save_upload(home, raw, filename or "upload.htemplate")
-    return fetch(source, home, allow_path=_allowed_path(home))
+    return fetch(source, home, allow_path=_allowed_path(home) if restricted else None)
 
 
-def inspect(home: Path, source: str = "", data_base64: str = "", filename: str = "", name: str = "") -> dict:
-    path = resolve_source(home, source, data_base64, filename)
+def inspect(
+    home: Path, source: str = "", data_base64: str = "", filename: str = "", name: str = "",
+    *, restricted: bool = False,
+) -> dict:
+    path = resolve_source(home, source, data_base64, filename, restricted=restricted)
     bundle = open_bundle(path)
     return preview(home, bundle, name=name)
 
@@ -107,8 +117,9 @@ def apply(
     name: str = "",
     force: bool = False,
     enable_plugins: bool = True,
+    restricted: bool = False,
 ) -> dict:
-    path = resolve_source(home, source, data_base64, filename)
+    path = resolve_source(home, source, data_base64, filename, restricted=restricted)
     bundle: Bundle = open_bundle(path)
     return install(home, bundle, name=name, force=force, enable_plugins=enable_plugins)
 

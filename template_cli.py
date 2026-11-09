@@ -34,13 +34,13 @@ def setup_cli(parser) -> None:
 
     create = sub.add_parser("create", help="Pack a profile into a .htemplate bundle")
     create.add_argument("profile", help="Profile to pack ('default' for this home's own agent)")
-    create.add_argument("-o", "--output", help="Output file (default: plugin-data/hermes-templates/)")
+    create.add_argument("--out", help="Output file (default: plugin-data/hermes-templates/)")
     create.add_argument("--name", help="Template id (default: the profile name)")
     create.add_argument("--title", help="Display name")
     create.add_argument("--description", help="One line about what this agent does")
     create.add_argument("--author", default="", help="Author name")
     create.add_argument("--license", default="", help="License (MIT, CC-BY-4.0…)")
-    create.add_argument("--version", default="1.0.0", help="Template version")
+    create.add_argument("--template-version", default="1.0.0", help="Template version (default 1.0.0)")
     create.add_argument("--no-skills", action="store_true", help="Leave skills out")
     create.add_argument("--skill", action="append", metavar="NAME", help="Only this skill (repeatable)")
     create.add_argument("--no-cron", action="store_true", help="Leave routines out")
@@ -83,6 +83,10 @@ def handle_cli(args) -> int:
     return 2
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def _list(home: Path, args) -> int:
     profiles = list_profiles(home)
     library = store.library(home)
@@ -94,9 +98,9 @@ def _list(home: Path, args) -> int:
     if not profiles:
         print("  (none)")
     for profile in profiles:
-        bits = [f"{profile['skills_count']} skills", f"{profile['cron_count']} routines"]
+        bits = [_plural(profile["skills_count"], "skill"), _plural(profile["cron_count"], "routine")]
         if profile["plugins"]:
-            bits.append(f"{len(profile['plugins'])} plugins")
+            bits.append(_plural(len(profile["plugins"]), "plugin"))
         print(f"  {profile['id']:<20} {' · '.join(bits)}")
     print("\nTemplates built here:")
     if not library:
@@ -116,14 +120,14 @@ def _create(home: Path, args) -> int:
         description=args.description or "",
         author=args.author,
         license=args.license,
-        version=args.version,
+        version=args.template_version,
         skills=not args.no_skills,
         skill_names=args.skill or None,
         cron=not args.no_cron,
         memories=args.with_memories,
         mcp=not args.no_mcp,
         plugins=not args.no_plugins,
-        out=Path(args.output).expanduser() if args.output else None,
+        out=Path(args.out).expanduser() if args.out else None,
     )
     if args.json:
         print(json.dumps(result, indent=2, default=str))
@@ -207,4 +211,6 @@ def _install(home: Path, args) -> int:
     if result["plugins_missing"]:
         print(f"  plugins missing here: {', '.join(result['plugins_missing'])}")
     print(f"  start it with: hermes -p {result['profile']} chat")
+    for step in result.get("next_steps") or []:
+        print(f"  connect a key: {step}")
     return 0

@@ -280,3 +280,35 @@ def test_zip_bomb_ratio_is_refused(home: Path, tmp_path: Path):
         archive.writestr("skills/x/big.txt", b"0" * (4 * 1024 * 1024))
     with pytest.raises(InvalidBundle):
         open_bundle(bomb)
+
+
+def test_install_clears_a_deleted_profile_tombstone(home: Path):
+    result = build(home, "testbot")
+    api.apply(home, str(result.path), name="copybot")
+    (home / "profiles" / ".deleted").mkdir(parents=True, exist_ok=True)
+    (home / "profiles" / ".deleted" / "copybot").write_text("")
+    updated = api.apply(home, str(result.path), name="copybot", force=True)
+    assert updated["replaced"] is True
+    assert not (home / "profiles" / ".deleted" / "copybot").exists()
+
+
+def test_install_returns_the_keys_to_connect(home: Path):
+    result = build(home, "testbot")
+    installed = api.apply(home, str(result.path), name="copybot")
+    assert installed["next_steps"] == ["hermes -p copybot config set SEARCH_API_KEY <your key>"]
+
+
+def test_a_profile_home_sees_its_siblings(home: Path, tmp_path: Path):
+    """A gateway runs inside one profile; the agents to share are its siblings."""
+    sibling = home / "profiles" / "otherbot"
+    (sibling / "skills").mkdir(parents=True)
+    (sibling / "config.yaml").write_text("model:\n  default: x\n", encoding="utf-8")
+    from agent_templates.profiles import layout, list_profiles, profile_path
+
+    info = layout(home / "profiles" / "testbot")
+    assert info.root == home
+    assert info.own == "testbot"
+    assert profile_path(home / "profiles" / "testbot", "otherbot") == sibling
+    ids = [p["id"] for p in list_profiles(home / "profiles" / "testbot")]
+    assert ids[:2] == ["testbot", "otherbot"]
+    assert "default" not in ids  # no config.yaml at the root in this fixture

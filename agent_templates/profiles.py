@@ -1,12 +1,21 @@
 """Profile discovery: which agents live in this Hermes home, and where.
 
-Deliberately small and read-only. The packer reads a profile directory; the
-installer writes a new one. Nothing here mutates an existing profile.
+A gateway usually runs *inside* one profile (``HERMES_HOME`` is
+``<root>/profiles/<name>``), while the agents the person wants to share are its
+siblings. So the layout is resolved once, and everything else asks this module:
+
+* ``root``          — the Hermes home that owns ``profiles/`` (``/opt/data``)
+* ``profiles_dir``  — where named profiles live
+* ``own``           — the profile this process is running as, if any
+
+Nothing here mutates an existing profile: the packer reads one, the installer
+writes a new one.
 """
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import ProfileNotFound
@@ -26,14 +35,41 @@ def hermes_home() -> Path:
         return Path.home() / ".hermes"
 
 
+@dataclass(frozen=True)
+class Layout:
+    root: Path
+    profiles_dir: Path
+    own: str | None
+
+    @property
+    def home(self) -> Path:
+        return self.profiles_dir / self.own if self.own else self.root
+
+
+def layout(home: Path | None = None) -> Layout:
+    home = Path(home or hermes_home())
+    if home.parent.name == "profiles" and (home / "config.yaml").is_file():
+        return Layout(root=home.parent.parent, profiles_dir=home.parent, own=home.name)
+    return Layout(root=home, profiles_dir=home / "profiles", own=None)
+
+
 def profile_path(home: Path, name: str) -> Path:
-    """Directory of a profile: ``default`` (the home itself) or ``profiles/<name>``."""
+    """Directory of a profile, whichever home this process runs in."""
     name = (name or "default").strip()
-    if name in ("", "default"):
-        return Path(home)
+    info = layout(home)
+    if not name or name == "default":
+        return info.root
+    if info.own and name == info.own:
+        return info.profiles_dir / name
     if not PROFILE_ID_RE.match(name):
         raise ProfileNotFound(f"unknown profile {name!r}")
-    return Path(home) / "profiles" / name
+    candidate = info.profiles_dir / name
+    if candidate.is_dir():
+        return candidate
+    nested = info.home / "profiles" / name
+    if nested.is_dir():
+        return nested
+    return candidate
 
 
 def profile_exists(home: Path, name: str) -> bool:
@@ -45,24 +81,44 @@ def profile_exists(home: Path, name: str) -> bool:
 
 
 def list_profiles(home: Path | None = None) -> list[dict]:
-    """Every profile in this home, with the few numbers a share card needs."""
+    """Every agent this machine can share: this profile, its siblings, the root one."""
     home = Path(home or hermes_home())
+    info = layout(home)
     found: list[dict] = []
+    seen: set[Path] = set()
 
-    if (home / "config.yaml").is_file():
-        found.append(_summary(home, "default"))
+    def add(path: Path, name: str) -> None:
+        resolved = path.resolve()
+        if resolved in seen or not (path / "config.yaml").is_file():
+            return
+        seen.add(resolved)
+        found.append(_summary(path, name))
 
-    profiles_dir = home / "profiles"
-    if profiles_dir.is_dir():
-        for entry in sorted(profiles_dir.iterdir()):
+    if info.own:
+        add(info.profiles_dir / info.own, info.own)
+
+    if info.profiles_dir.is_dir():
+        for entry in sorted(info.profiles_dir.iterdir()):
             if not entry.is_dir() or entry.name.startswith("."):
                 continue
             if not PROFILE_ID_RE.match(entry.name):
                 continue
-            if not (entry / "config.yaml").is_file():
-                continue
-            found.append(_summary(entry, entry.name))
+            add(entry, entry.name)
+
+    if info.root != info.profiles_dir and info.root.is_dir():
+        add(info.root, "default")
+
     return found
+
+
+def plugins_dirs(home: Path) -> tuple[Path, ...]:
+    """Where a plugin may live on this machine (profile first, then the root home)."""
+    info = layout(home)
+    dirs = []
+    if info.own:
+        dirs.append(info.profiles_dir / info.own / "plugins")
+    dirs.append(info.root / "plugins")
+    return tuple(dirs)
 
 
 def _summary(path: Path, name: str) -> dict:

@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .errors import InvalidBundle, ProfileExists, TemplateError, UnsafeBundle
 from .manifest import normalize, verify_index
+from .profiles import layout, plugins_dirs
 from .safety import (
     MAX_BUNDLE_BYTES,
     MAX_COMPRESSION_RATIO,
@@ -30,7 +31,6 @@ from .safety import (
     ensure_safe,
     forbidden_reason,
     normalize_rel,
-    scrub_file,
     validate_profile_name,
 )
 from .yamlio import dump_yaml, load_yaml
@@ -177,7 +177,7 @@ def preview(home: Path, bundle: Bundle, *, name: str = "") -> dict:
     """What the installer will get, before anything is written."""
     home = Path(home)
     target_name = validate_profile_name(name or bundle.name)
-    target = home / "profiles" / target_name
+    target = layout(home).profiles_dir / target_name
     exists = target.is_dir() and any((target / m).is_file() for m in ("config.yaml", "SOUL.md", "profile.yaml"))
     replaceable = exists and (target / MARKER).is_file()
 
@@ -231,7 +231,7 @@ def install(
     home = Path(home)
     preview_data = preview(home, bundle, name=name)
     target_name = preview_data["name"]
-    target = home / "profiles" / target_name
+    target = layout(home).profiles_dir / target_name
     exists = preview_data["exists"]
     replaceable = preview_data["replaceable"]
 
@@ -243,9 +243,14 @@ def install(
     if exists and replaceable and not force:
         raise ProfileExists(f"template {target_name!r} is already installed; pass --force to update it")
 
-    home.mkdir(parents=True, exist_ok=True)
-    (home / "profiles").mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f".htemplate-{target_name}-", dir=home / "profiles"))
+    profiles_dir = layout(home).profiles_dir
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    # A profile deleted earlier leaves a tombstone in ``profiles/.deleted/`` that makes
+    # Hermes treat a directory of that name as gone. Installing is an explicit "this
+    # name again", so the tombstone goes first — otherwise the profile is written and
+    # then invisible to every `-p` invocation.
+    (profiles_dir / ".deleted" / target_name).unlink(missing_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".htemplate-{target_name}-", dir=profiles_dir))
 
     try:
         _extract(bundle, staging)
@@ -263,9 +268,15 @@ def install(
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
+    next_steps = [
+        f"hermes -p {target_name} config set {item['name']} <your key>"
+        for item in preview_data["env_requires"]
+        if not (item["set"] or item["in_env_file"])
+    ]
     return {
         "profile": target_name,
         "path": str(target),
+        "next_steps": next_steps,
         "manifest": bundle.manifest,
         "plugins_enabled": preview_data["plugins_available"] if enable_plugins else [],
         "plugins_missing": preview_data["plugins_missing"],
@@ -276,6 +287,14 @@ def install(
 
 
 def _extract(bundle: Bundle, dest: Path) -> None:
+    """Write the bundle's files, byte for byte.
+
+    No redaction happens here on purpose: the checksums in ``template.yaml``
+    describe the exact bytes the author packed, and redacting again would
+    rewrite already-redacted text (the redactor is not idempotent) and fail its
+    own verification. Redaction is the packer's job; the installer's job is to
+    refuse a bundle that carries a credential path at all.
+    """
     with zipfile.ZipFile(bundle.path) as archive:
         for info in archive.infolist():
             if info.is_dir():
@@ -285,7 +304,6 @@ def _extract(bundle: Bundle, dest: Path) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as source, open(target, "wb") as handle:
                 shutil.copyfileobj(source, handle)
-            scrub_file(target)
 
 
 def _prepare_profile(
@@ -378,9 +396,11 @@ def _env_has(home: Path, profile: str, key: str) -> bool:
 
 
 def _split_plugins(home: Path, plugins: list[str]) -> tuple[list[str], list[str]]:
+    """Which of the template's plugin ids exist on this machine (profile first, then root)."""
+    dirs = plugins_dirs(home)
     available, missing = [], []
     for plugin in plugins:
-        if (Path(home) / "plugins" / plugin).is_dir():
+        if any((base / plugin).is_dir() for base in dirs):
             available.append(plugin)
         else:
             missing.append(plugin)

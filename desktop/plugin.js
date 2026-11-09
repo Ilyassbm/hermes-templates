@@ -6,7 +6,24 @@
 // anything the preview did not show first.
 import { host, haptic, ROUTES_AREA, SIDEBAR_NAV_AREA } from '@hermes/plugin-sdk'
 import { useEffect, useRef, useState } from 'react'
-import { jsx, jsxs } from 'react/jsx-runtime'
+import { jsx as runtimeJsx, jsxs as runtimeJsxs } from 'react/jsx-runtime'
+
+// The automatic runtime's third argument is the React *key*, not children —
+// passing an array there silently renders an empty element. These two wrappers
+// take children third, the way this file is written, and hand them to the
+// runtime under `props.children`.
+const jsx = (type, props, children) =>
+  runtimeJsx(type, children === undefined ? props : { ...props, children })
+const jsxs = (type, props, children) =>
+  runtimeJsxs(type, children === undefined ? props : { ...props, children })
+
+const tap = (kind) => {
+  try {
+    haptic(kind)
+  } catch (e) {
+    /* haptics are decorative: an unknown kind must never break a click */
+  }
+}
 
 let rest = null
 
@@ -26,6 +43,30 @@ const T = {
   ok: 'var(--ui-success)',
   warn: 'var(--ui-warning)',
   bad: 'var(--ui-danger)'
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+// Text on a filled accent button. `--ui-bg-primary` is a *background* token and
+// turns into a translucent tint here (measured: 24% alpha on the accent, so the
+// label vanished). Pick black or white from the accent's own luminance instead,
+// which holds in both themes and for a retinted accent.
+let inkCache = null
+function accentInk() {
+  if (inkCache) return inkCache
+  try {
+    const probe = document.createElement('div')
+    probe.style.cssText = 'position:absolute;left:-9999px;top:0;background:var(--ui-accent)'
+    document.body.appendChild(probe)
+    const rgb = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    const parts = (rgb.match(/[\d.]+/g) || []).slice(0, 3).map(Number)
+    const luminance = (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) / 255
+    inkCache = luminance > 0.6 ? '#0b0b0c' : '#ffffff'
+  } catch (e) {
+    inkCache = '#ffffff'
+  }
+  return inkCache
 }
 
 const el = (tag, props, children) => jsx(tag, { ...props, children })
@@ -52,7 +93,7 @@ const S = {
   btn: (primary, disabled) => ({
     appearance: 'none', border: `1px solid ${primary ? 'transparent' : T.stroke}`,
     background: primary ? T.accent : 'transparent',
-    color: primary ? 'var(--ui-bg-primary)' : T.text,
+    color: primary ? accentInk() : T.text,
     borderRadius: 7, padding: '6px 12px', fontSize: 12.5, fontWeight: 550,
     fontFamily: 'inherit', cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.45 : 1
@@ -129,7 +170,7 @@ function Button({ children, onClick, primary, disabled, title }) {
 async function copy(text) {
   try {
     await navigator.clipboard.writeText(text)
-    haptic('tap')
+    tap('tap')
     return true
   } catch (e) {
     return false
@@ -220,7 +261,7 @@ function ShareTab({ profiles, onCreated }) {
     try {
       const payload = await requestReady(() => rest('/create', {
         method: 'POST',
-        body: JSON.stringify({
+        body: ({
           profile: profile.id,
           ...form,
           skills: options.skills,
@@ -231,7 +272,7 @@ function ShareTab({ profiles, onCreated }) {
         })
       }))
       setResult(payload)
-      haptic('success')
+      tap('success')
       if (onCreated) onCreated()
     } catch (e) {
       setError(String((e && e.message) || e))
@@ -243,7 +284,7 @@ function ShareTab({ profiles, onCreated }) {
   const save = async () => {
     if (!result) return
     try {
-      const payload = await rest(`/download/${result.id}`, { method: 'POST', body: JSON.stringify({}) })
+      const payload = await rest(`/download/${result.id}`, { method: 'POST', body: {} })
       downloadBlob(payload.filename, payload.data_base64)
     } catch (e) {
       setError(String((e && e.message) || e))
@@ -262,7 +303,7 @@ function ShareTab({ profiles, onCreated }) {
         ...profiles.map((p) => jsxs('button', {
           key: p.id,
           type: 'button',
-          onClick: () => { haptic('tap'); setSelected(p.id) },
+          onClick: () => { tap('tap'); setSelected(p.id) },
           style: {
             appearance: 'none', textAlign: 'left', fontFamily: 'inherit', cursor: 'pointer',
             padding: '8px 10px', borderRadius: 8,
@@ -275,7 +316,7 @@ function ShareTab({ profiles, onCreated }) {
             jsx('span', {
               key: 'm',
               style: { fontSize: 11, color: T.faint },
-              children: `${p.skills_count} skills · ${p.cron_count} routines`
+              children: `${plural(p.skills_count, 'skill')} · ${plural(p.cron_count, 'routine')}`
             })
           ]
         }))
@@ -370,10 +411,10 @@ function ShareTab({ profiles, onCreated }) {
             key: 'chips',
             children: [
               result.manifest.contents.soul ? jsx(Chip, { key: 's', tone: 'ok' }, 'identity') : null,
-              result.manifest.contents.skills.length ? jsx(Chip, { key: 'sk' }, `${result.manifest.contents.skills.length} skills`) : null,
-              result.manifest.contents.cron.length ? jsx(Chip, { key: 'c' }, `${result.manifest.contents.cron.length} routines`) : null,
-              result.manifest.contents.mcp.length ? jsx(Chip, { key: 'm' }, `${result.manifest.contents.mcp.length} mcp`) : null,
-              result.manifest.contents.plugins.length ? jsx(Chip, { key: 'p' }, `${result.manifest.contents.plugins.length} plugins`) : null,
+              result.manifest.contents.skills.length ? jsx(Chip, { key: 'sk' }, plural(result.manifest.contents.skills.length, 'skill')) : null,
+              result.manifest.contents.cron.length ? jsx(Chip, { key: 'c' }, plural(result.manifest.contents.cron.length, 'routine')) : null,
+              result.manifest.contents.mcp.length ? jsx(Chip, { key: 'm' }, plural(result.manifest.contents.mcp.length, 'server')) : null,
+              result.manifest.contents.plugins.length ? jsx(Chip, { key: 'p' }, plural(result.manifest.contents.plugins.length, 'plugin')) : null,
               result.manifest.contents.memories ? jsx(Chip, { key: 'mem', tone: 'warn' }, 'memories included') : null
             ].filter(Boolean)
           }),
@@ -414,10 +455,10 @@ function InstallTab() {
     setError('')
     setDone(null)
     try {
-      const data = await requestReady(() => rest('/preview', { method: 'POST', body: JSON.stringify(payload) }))
+      const data = await requestReady(() => rest('/preview', { method: 'POST', body: payload }))
       setPreview(data)
       setTarget(data.name)
-      haptic('tap')
+      tap('tap')
     } catch (e) {
       setPreview(null)
       setError(String((e && e.message) || e))
@@ -446,9 +487,9 @@ function InstallTab() {
       const body = upload
         ? { data_base64: upload.data_base64, filename: upload.filename, name: target, force: true }
         : { source, name: target, force: true }
-      const data = await requestReady(() => rest('/install', { method: 'POST', body: JSON.stringify(body) }), 3)
+      const data = await requestReady(() => rest('/install', { method: 'POST', body }), 3)
       setDone(data)
-      haptic('success')
+      tap('success')
     } catch (e) {
       setError(String((e && e.message) || e))
     } finally {
@@ -531,10 +572,10 @@ function InstallTab() {
           key: 'chips',
           children: [
             manifest.contents.soul ? jsx(Chip, { key: 's', tone: 'ok' }, 'SOUL.md') : null,
-            manifest.contents.skills.length ? jsx(Chip, { key: 'sk' }, `${manifest.contents.skills.length} skills`) : null,
-            manifest.contents.cron.length ? jsx(Chip, { key: 'c' }, `${manifest.contents.cron.length} routines`) : null,
-            manifest.contents.mcp.length ? jsx(Chip, { key: 'm' }, `${manifest.contents.mcp.length} mcp`) : null,
-            manifest.contents.plugins.length ? jsx(Chip, { key: 'p' }, `${manifest.contents.plugins.length} plugins`) : null,
+            manifest.contents.skills.length ? jsx(Chip, { key: 'sk' }, plural(manifest.contents.skills.length, 'skill')) : null,
+            manifest.contents.cron.length ? jsx(Chip, { key: 'c' }, plural(manifest.contents.cron.length, 'routine')) : null,
+            manifest.contents.mcp.length ? jsx(Chip, { key: 'm' }, plural(manifest.contents.mcp.length, 'server')) : null,
+            manifest.contents.plugins.length ? jsx(Chip, { key: 'p' }, plural(manifest.contents.plugins.length, 'plugin')) : null,
             manifest.contents.memories ? jsx(Chip, { key: 'mem', tone: 'warn' }, 'memories') : null
           ].filter(Boolean)
         }),
@@ -570,16 +611,18 @@ function InstallTab() {
         jsxs('div', { key: 'target', style: { display: 'flex', alignItems: 'flex-end', gap: 10 } }, [
           jsx('div', { key: 'f', style: { flex: 1 } }, jsx(Field, {
             label: 'Install as profile',
-            hint: preview.exists
-              ? (preview.replaceable ? 'Already installed from a template — Install updates it, your data stays.' : 'That name is taken by a profile this installer did not create.')
-              : `New profile at ${preview.target_path}`
+            hint: target && target === preview.name && preview.exists
+              ? (preview.replaceable
+                  ? 'Already installed from a template — Install updates it, your data stays.'
+                  : 'That name is taken by a profile this installer did not create.')
+              : `New profile named ${target || '…'} under profiles/`
           }, jsx('input', {
             style: S.input, value: target, onChange: (e) => setTarget(e.target.value)
           }))),
           jsx(Button, {
             key: 'go', primary: true, onClick: install,
-            disabled: busy || !target || (preview.exists && !preview.replaceable)
-          }, busy ? 'Installing…' : preview.exists ? 'Update' : 'Install')
+            disabled: busy || !target
+          }, busy ? 'Installing…' : preview.exists && target === preview.name ? 'Update' : 'Install')
         ])
       ]) : null,
 
@@ -597,7 +640,24 @@ function InstallTab() {
           ? jsx('div', { key: 'pm', style: { fontSize: 11.5, color: T.warn } }, `Not installed here: ${done.plugins_missing.join(', ')}`)
           : null,
         jsx('div', { key: 'h', style: { fontSize: 11.5, color: T.faint, marginTop: 2 } },
-          `Start it with: hermes -p ${done.profile} chat — routines are paused, review them before enabling.`)
+          `Start it with: hermes -p ${done.profile} chat — routines are paused, review them before enabling.`),
+        (done.manifest.contents.cron || []).length
+          ? jsx('div', { key: 'rev', style: { marginTop: 6 } }, jsx(Button, {
+              onClick: () => { try { host.navigate('/cron') } catch (e) { /* older host */ } }
+            }, `Review ${plural(done.manifest.contents.cron.length, 'routine')}`))
+          : null,
+        (done.next_steps || []).length
+          ? jsxs('div', { key: 'ns', style: { display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 } }, [
+              jsx('div', { key: 'l', style: { ...S.label } }, 'Connect your keys'),
+              ...done.next_steps.map((step, i) => jsx('code', {
+                key: i,
+                style: {
+                  fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 11, color: T.dim,
+                  background: T.input, border: `1px solid ${T.stroke}`, borderRadius: 5, padding: '3px 6px'
+                }
+              }, step))
+            ])
+          : null
       ]) : null
     ]
   })
@@ -622,7 +682,7 @@ function TemplatesPage() {
   const tabButton = (id, label) => jsx('button', {
     key: id,
     type: 'button',
-    onClick: () => { haptic('tap'); setTab(id) },
+    onClick: () => { tap('tap'); setTab(id) },
     style: {
       appearance: 'none', border: 'none', background: 'transparent', cursor: 'pointer',
       fontFamily: 'inherit', fontSize: 12.5, padding: '4px 2px', fontWeight: 550,
