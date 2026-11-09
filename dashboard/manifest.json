@@ -1,0 +1,10 @@
+{
+  "name": "hermes-templates",
+  "label": "Agent Templates",
+  "description": "One-click share and install of a whole Hermes agent (identity, skills, routines, memory, plugins) as a .htemplate bundle or link.",
+  "version": "1.0.0",
+  "tab": {
+    "hidden": true
+  },
+  "api": "plugin_api.py"
+}

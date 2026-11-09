@@ -1,0 +1,17 @@
+name: hermes-templates
+label: Agent Templates
+kind: standalone
+version: 1.0.0
+author: Ilyass Bm
+license: MIT
+description: >
+  One-click share and install of a whole Hermes agent. `hermes template create` packs a profile
+  into a single `.htemplate` bundle — identity (SOUL.md), configuration, skills, routines, MCP
+  servers, published memories and plugin ids — and `hermes template install` turns a bundle or a
+  link into a new profile. Credentials, sessions, conversation history, logs and caches never
+  travel; every text file is redacted with Hermes' own secret redactor before packing; install
+  always previews first, ships routines paused and never auto-enables a plugin. The Desktop app
+  gets a Templates page with a Share tab and an Install tab (drag a bundle, or paste a link).
+requires_hermes: ">=0.23"
+provides_tools: []
+provides_hooks: []
