@@ -12,11 +12,31 @@ Install→ paste the link, drop the file → preview → one click → new profi
 ## Install
 
 ```bash
-hermes plugins install /path/to/hermes-templates --enable   # or: hermes plugins enable hermes-templates
+hermes plugins install Ilyassbm/hermes-templates --enable
 hermes template list
 ```
 
-Desktop: **Templates** appears in the sidebar (`/templates`).
+From a local checkout: `hermes plugins install file:///path/to/hermes-templates --enable --force`.
+
+Desktop: **Templates** appears in the sidebar (`/templates`). A unified package's
+desktop half starts disabled per browser — enable it in **Capabilities ▸ Plugins**
+once, or it stays hidden.
+
+## What it touches
+
+- **Filesystem, read**: one profile directory under `$HERMES_HOME` (`config.yaml`,
+  `SOUL.md`, `skills/`, `cron/jobs.json`, `mcp.json`, `memories/` when opted in),
+  skipping every credential, session and cache path.
+- **Filesystem, write**: a new profile directory under `$HERMES_HOME/profiles/`,
+  and its own bundles under `$HERMES_HOME/plugin-data/hermes-templates/`.
+- **Network**: one HTTPS GET, only to a URL you paste, only when you press
+  Preview or Install. Nothing is fetched at startup, on a timer or in the
+  background; no telemetry, no update check, no third-party service.
+- **No shell**: nothing is executed on behalf of a bundle. Skills, `SOUL.md` and
+  routines land as files, and routines are written paused.
+- The page talks to its own backend (`/api/plugins/hermes-templates`), behind the
+  gateway's normal authentication. It may read a bundle only from `$HERMES_HOME`
+  or your home directory; the CLI has no such limit.
 
 ## CLI
 
