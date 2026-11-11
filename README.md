@@ -247,6 +247,21 @@ Install: paste the link, the update is offered on its own.
 
 ## Develop
 
+The page paints with the app's theme tokens, and only tokens the app actually
+defines **and** redefines for dark. Two traps, both measured here:
+
+- `--ui-bg-input` is set once (`#fcfcfc`) and never overridden by `.dark`. Using it
+  as a field background painted white boxes with light text on a dark page.
+- the app's own `desktop-input-chrome` is `--dt-input-bg: 0%` / `--dt-input-border: 4%`
+  in this build: fields read as plain text. The plugin ships its own `.ht-field`
+  rules instead (background, border, placeholder, focus ring), all from tokens
+  that follow the theme.
+
+`--ui-border`, `--ui-success`, `--ui-warning` and `--ui-danger` do not exist; the
+real names are `--ui-stroke-primary`, `--ui-green`, `--ui-yellow`, `--ui-red`.
+A page also gets whatever width its slot has (520 px here, full width in the app's
+own window), so the layout reflows on a container query rather than on the window.
+
 The plugin is a plain Python package plus one uncompiled ESM file — no build step.
 
 ```bash

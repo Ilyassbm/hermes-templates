@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1 — readable in the dark
+
+- Fields were painted with `--ui-bg-input`, a token defined once and never
+  overridden by the dark theme: white boxes with light text on a dark page. Fields
+  now use tokens that follow the theme, with their own placeholder and focus rules.
+- `--ui-border`, `--ui-success`, `--ui-warning`, `--ui-danger` do not exist in the
+  app; mapped to the real names (`--ui-stroke-primary`, `--ui-green`,
+  `--ui-yellow`, `--ui-red`), so borders and status colours actually render.
+- The page reflows on a container query: in a narrow slot (measured 520 px) the
+  agent list and the form stack instead of squeezing the fields to 87 px.
+- Two French placeholders in an otherwise English UI, now English.
+
 ## 1.2.0 — the link
 
 - **Publish**: upload a bundle to a GitHub repository and get one permanent raw

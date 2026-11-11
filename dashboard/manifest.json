@@ -2,7 +2,7 @@
   "name": "hermes-templates",
   "label": "Agent Templates",
   "description": "One-click share and install of a whole Hermes agent (identity, skills, routines, memory, plugins) as a .htemplate bundle or link.",
-  "version": "1.1.0",
+  "version": "1.2.1",
   "tab": {
     "hidden": true
   },

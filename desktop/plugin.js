@@ -31,19 +31,57 @@ let osDoor = null // ctx.os: clipboard + open-external, scoped by the host
 const ROUTES = ROUTES_AREA || 'routes'
 const SIDEBAR_NAV = SIDEBAR_NAV_AREA || 'sidebar.nav'
 
+// Only tokens the app actually defines, and only ones redefined in the dark
+// theme: `--ui-bg-input` is set once for light (`#fcfcfc`) and never overridden,
+// which painted white fields with light text on a dark page. Field chrome comes
+// from the app's own `desktop-input-chrome` class instead (see FIELD_CLASS).
 const T = {
   text: 'var(--ui-text-primary)',
   dim: 'var(--ui-text-secondary)',
   faint: 'var(--ui-text-tertiary)',
-  border: 'var(--ui-border)',
+  border: 'var(--ui-stroke-primary)',
   stroke: 'var(--ui-stroke-secondary)',
   card: 'var(--ui-bg-card)',
   raised: 'var(--ui-bg-elevated)',
-  input: 'var(--ui-bg-input)',
+  code: 'var(--ui-inline-code-background)',
+  codeText: 'var(--ui-inline-code-foreground)',
   accent: 'var(--ui-accent)',
-  ok: 'var(--ui-success)',
-  warn: 'var(--ui-warning)',
-  bad: 'var(--ui-danger)'
+  ok: 'var(--ui-green)',
+  warn: 'var(--ui-yellow)',
+  bad: 'var(--ui-red)'
+}
+
+// The app's own `desktop-input-chrome` is `--dt-input-bg: 0%` / `--dt-input-border: 4%`
+// in this build: fields read as plain text. We paint from the theme tokens instead
+// (all redefined in the dark theme), and inject the placeholder/focus rules that
+// inline styles cannot express.
+const FIELD_CLASS = 'ht-field'
+const FIELD_CSS = `
+.ht-page { container-type: inline-size; }
+.ht-grid { display: grid; gap: 18px; grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); align-items: start; }
+.ht-pair { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.ht-panel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ht-list { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* The host hands a page whatever width its slot has (measured: 520px here, wide in the
+   app's own window). Collapse to one column rather than squeezing the fields. */
+@container (max-width: 700px) {
+  .ht-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.ht-field { background: var(--ui-bg-elevated); border: 1px solid var(--ui-stroke-primary); color: var(--ui-text-primary); }
+.ht-field::placeholder { color: var(--ui-text-tertiary); opacity: 1; }
+.ht-field:hover { border-color: var(--ui-stroke-secondary); }
+.ht-field:focus, .ht-field:focus-visible {
+  border-color: var(--ui-accent); outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-accent) 28%, transparent);
+}
+`
+
+function injectFieldCss() {
+  if (document.getElementById('ht-field-css')) return
+  const style = document.createElement('style')
+  style.id = 'ht-field-css'
+  style.textContent = FIELD_CSS
+  document.head.appendChild(style)
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -84,11 +122,11 @@ const S = {
   card: {
     background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: 14
   },
-  label: { fontSize: 11, fontWeight: 500, color: T.faint, textTransform: 'uppercase', letterSpacing: '0.04em' },
+  label: { fontSize: 11, fontWeight: 500, color: T.dim, textTransform: 'uppercase', letterSpacing: '0.04em' },
   input: {
-    width: '100%', boxSizing: 'border-box', background: T.input, color: T.text,
-    border: `1px solid ${T.stroke}`, borderRadius: 7, padding: '7px 9px', fontSize: 13,
-    fontFamily: 'inherit', outline: 'none'
+    width: '100%', boxSizing: 'border-box', background: T.raised,
+    border: `1px solid ${T.border}`, color: T.text, borderRadius: 6,
+    padding: '7px 9px', fontSize: 13, fontFamily: 'inherit', outline: 'none'
   },
   btn: (primary, disabled) => ({
     appearance: 'none', border: `1px solid ${primary ? 'transparent' : T.stroke}`,
@@ -304,7 +342,7 @@ function PublishPanel({ templateId, onPublished }) {
       jsx('code', {
         key: 'u',
         style: {
-          fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 11.5, color: T.text, background: T.input,
+          fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 11.5, color: T.codeText, background: T.code,
           border: `1px solid ${T.stroke}`, borderRadius: 6, padding: '7px 9px', wordBreak: 'break-all', userSelect: 'all'
         }
       }, out.url),
@@ -437,9 +475,9 @@ function ShareTab({ profiles, onCreated }) {
   }
 
   return jsxs('div', {
-    style: { display: 'grid', gridTemplateColumns: 'minmax(180px, 240px) 1fr', gap: 18, alignItems: 'start' },
+    className: 'ht-grid',
     children: [
-      box({ key: 'list', style: { display: 'flex', flexDirection: 'column', gap: 3 } }, [
+      box({ key: 'list', className: 'ht-list' }, [
         box({ key: 'l', style: { ...S.label, marginBottom: 6 } }, 'Your agents'),
         ...profiles.map((p) => jsxs('button', {
           key: p.id,
@@ -462,34 +500,34 @@ function ShareTab({ profiles, onCreated }) {
           ]
         }))
       ]),
-      box({ key: 'panel', style: { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 } }, [
+      box({ key: 'panel', className: 'ht-panel' }, [
         jsxs('div', { key: 'form', style: { ...S.card, display: 'flex', flexDirection: 'column', gap: 12 } }, [
-          jsxs('div', { key: 'r1', style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } }, [
+          jsxs('div', { key: 'r1', className: 'ht-pair' }, [
             jsx(Field, { key: 'a', label: 'Template id' }, jsx('input', {
-              style: S.input, value: form.name, onChange: set('name'), placeholder: 'dex'
+              style: S.input, className: FIELD_CLASS, value: form.name, onChange: set('name'), placeholder: 'dex'
             })),
             jsx(Field, { key: 'b', label: 'Version' }, jsx('input', {
-              style: S.input, value: form.version, onChange: set('version'), placeholder: '1.0.0'
+              style: S.input, className: FIELD_CLASS, value: form.version, onChange: set('version'), placeholder: '1.0.0'
             }))
           ]),
           jsx(Field, {
             key: 'r2', label: 'Name people see',
             hint: 'One line that says what this agent is for.'
           }, jsx('input', {
-            style: S.input, value: form.title, onChange: set('title'),
-            placeholder: 'Dex — CTO qui orchestre les livraisons'
+            style: S.input, className: FIELD_CLASS, value: form.title, onChange: set('title'),
+            placeholder: 'Dex — CTO, runs the delivery work'
           })),
           jsx(Field, { key: 'r3', label: 'Description' }, jsx('textarea', {
-            style: { ...S.input, minHeight: 56, resize: 'vertical' },
+            style: { ...S.input, minHeight: 56, resize: 'vertical' }, className: FIELD_CLASS,
             value: form.description, onChange: set('description'),
-            placeholder: 'Ce que l’agent fait, pour qui, et ce qu’il ne fait pas.'
+            placeholder: 'What this agent does, for whom, and what it does not do.'
           })),
-          jsxs('div', { key: 'r4', style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 } }, [
+          jsxs('div', { key: 'r4', className: 'ht-pair' }, [
             jsx(Field, { key: 'a', label: 'Author' }, jsx('input', {
-              style: S.input, value: form.author, onChange: set('author'), placeholder: 'Your name'
+              style: S.input, className: FIELD_CLASS, value: form.author, onChange: set('author'), placeholder: 'Your name'
             })),
             jsx(Field, { key: 'b', label: 'License' }, jsx('input', {
-              style: S.input, value: form.license, onChange: set('license'), placeholder: 'MIT'
+              style: S.input, className: FIELD_CLASS, value: form.license, onChange: set('license'), placeholder: 'MIT'
             }))
           ]),
           box({ key: 'opts', style: { marginTop: 2 } }, [
@@ -669,7 +707,7 @@ function InstallTab() {
         jsx('div', { key: 'l', style: S.label }, 'Install a template'),
         jsxs('div', { key: 'row', style: { display: 'flex', gap: 8 } }, [
           jsx('input', {
-            key: 'i', style: { ...S.input, flex: 1 },
+            key: 'i', style: { ...S.input, flex: 1 }, className: FIELD_CLASS,
             placeholder: 'https://… .htemplate, or /path/to/file.htemplate',
             value: source,
             onChange: (e) => { setSource(e.target.value); setUpload(null); setPreview(null) },
@@ -775,7 +813,7 @@ function InstallTab() {
                   : 'That name is taken by a profile this installer did not create.')
               : `New profile named ${target || '…'} under profiles/`
           }, jsx('input', {
-            style: S.input, value: target, onChange: (e) => setTarget(e.target.value)
+            style: S.input, className: FIELD_CLASS, value: target, onChange: (e) => setTarget(e.target.value)
           }))),
           jsx(Button, {
             key: 'go', primary: true, onClick: install,
@@ -811,7 +849,7 @@ function InstallTab() {
                 key: i,
                 style: {
                   fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 11, color: T.dim,
-                  background: T.input, border: `1px solid ${T.stroke}`, borderRadius: 5, padding: '3px 6px'
+                  background: T.code, border: `1px solid ${T.stroke}`, borderRadius: 5, padding: '3px 6px'
                 }
               }, step))
             ])
@@ -851,6 +889,7 @@ function TemplatesPage() {
   })
 
   return jsxs('div', {
+    className: 'ht-page',
     style: S.page,
     children: [
       jsxs('div', { key: 'h', style: S.header }, [
@@ -886,6 +925,7 @@ export default {
   register(ctx) {
     rest = ctx.rest
     osDoor = ctx.os || null
+    injectFieldCss()
 
     ctx.register({
       id: 'page',
