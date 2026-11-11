@@ -16,7 +16,9 @@ no route returns a credential: the packer never stores one in the first place.
 from __future__ import annotations
 
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import Response
@@ -27,7 +29,7 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 from agent_templates import api, store  # noqa: E402
 from agent_templates.errors import TemplateError  # noqa: E402
-from agent_templates.profiles import hermes_home  # noqa: E402
+from agent_templates.profiles import hermes_home, profile_dir_for  # noqa: E402
 
 router = APIRouter()
 
@@ -36,6 +38,37 @@ _BODY = Body(default={})
 
 def _home() -> Path:
     return hermes_home()
+
+
+def _profile_dir(profile: str) -> Path | None:
+    """The profile a request names (``?profile=``, sent by every desktop ``ctx.rest`` call)."""
+    return profile_dir_for(hermes_home(), profile)
+
+
+@contextmanager
+def _credentials_for(profile: str) -> Iterator[None]:
+    """Install the named profile's secret scope for the duration of one request.
+
+    Without it, ``agent.secret_scope.get_secret`` runs unscoped and — in a gateway
+    serving several profiles — raises rather than borrowing, so the publish routes
+    reported "no GitHub token" while the token sat in the profile's ``.env``. Same
+    helper the dashboard's own profile routes use.
+    """
+    try:
+        from agent.secret_scope import build_profile_secret_scope, reset_secret_scope, set_secret_scope
+    except Exception:  # noqa: BLE001 - outside a Hermes runtime
+        yield
+        return
+    target = _profile_dir(profile) or hermes_home()
+    try:
+        token = set_secret_scope(build_profile_secret_scope(target), profile_home=str(target))
+    except Exception:  # noqa: BLE001 - never fail a request over a credential scope
+        yield
+        return
+    try:
+        yield
+    finally:
+        reset_secret_scope(token)
 
 
 @router.get("/profiles")
@@ -132,22 +165,24 @@ async def install(body: dict = _BODY):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.post("/publish/plan")
-async def publish_plan(body: dict = _BODY):
+async def publish_plan(body: dict = _BODY, profile: str = ""):
     """Read-only: what Publish would write, where, and whether it would create a repository."""
     try:
-        return api.publish_plan(_home(), str(body.get("id") or ""), str(body.get("repo") or ""))
+        with _credentials_for(profile):
+            return api.publish_plan(_home(), str(body.get("id") or ""), str(body.get("repo") or ""))
     except TemplateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/publish")
-async def publish(body: dict = _BODY):
+async def publish(body: dict = _BODY, profile: str = ""):
     try:
-        return api.publish(
-            _home(),
-            str(body.get("id") or ""),
-            str(body.get("repo") or ""),
-            create_repo=bool(body.get("create_repo", False)),
-        )
+        with _credentials_for(profile):
+            return api.publish(
+                _home(),
+                str(body.get("id") or ""),
+                str(body.get("repo") or ""),
+                create_repo=bool(body.get("create_repo", False)),
+            )
     except TemplateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -459,3 +459,24 @@ def test_a_broken_config_never_breaks_publishing(monkeypatch):
 
     monkeypatch.setattr(st, "_settings", lambda: {"publish_repo": 42})
     assert st.publish_repo() == ""  # not a string -> ignore it, no exception
+
+
+# ---------------------------------------------------------------- ?profile= and credentials
+
+def test_a_named_profile_resolves_only_when_it_really_exists(home: Path):
+    from agent_templates.profiles import profile_dir_for
+
+    (home / "profiles" / "other").mkdir()
+    assert profile_dir_for(home, "testbot") == home / "profiles" / "testbot"
+    assert profile_dir_for(home, "other") == home / "profiles" / "other"
+    for bad in ("", "  ", "../testbot", "testbot/../other", ".deleted", "missing", "/etc"):
+        assert profile_dir_for(home, bad) is None, bad
+
+
+def test_a_tombstoned_profile_is_not_a_credential_source(home: Path):
+    from agent_templates.profiles import profile_dir_for
+
+    (home / "profiles" / ".deleted").mkdir()
+    (home / "profiles" / ".deleted" / "gone").write_text("deleted\n")
+    (home / "profiles" / "gone").mkdir()
+    assert profile_dir_for(home, "gone") is None

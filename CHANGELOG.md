@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.3 — publish with the profile's own token
+
+- The publish routes read the named profile's credentials (``?profile=``, which every
+  desktop ``ctx.rest`` call already carries) through
+  ``build_profile_secret_scope`` — the same helper the dashboard's profile routes use.
+  Without it ``get_secret`` ran unscoped and, in a gateway serving several profiles,
+  raised instead of borrowing: the page said "No GitHub token" while the token sat in
+  that profile's ``.env``.
+- A profile name from the query string is matched against the profiles directory, so
+  ``..``, a slash or a tombstoned name resolves to nothing.
+- 63 tests.
+
 ## 1.2.2 — a settings page in the Desktop
 
 - `config_schema` in `plugin.yaml`: the plugin now shows up under **Settings →

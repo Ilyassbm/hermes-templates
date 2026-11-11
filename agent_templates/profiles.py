@@ -35,6 +35,23 @@ def hermes_home() -> Path:
         return Path.home() / ".hermes"
 
 
+def profile_dir_for(home: Path, name: str) -> Path | None:
+    """The profile directory *name* under *home*, or None.
+
+    The name comes from a ``?profile=`` query string, i.e. from outside: it is matched
+    against the profiles directory instead of being joined, so ``..``, a slash or a
+    tombstoned name resolves to None rather than to another directory on disk.
+    """
+    raw = (name or "").strip()
+    if not raw or raw.startswith(".") or "/" in raw or "\\" in raw:
+        return None
+    profiles = Path(home) / "profiles"
+    candidate = profiles / raw
+    if not candidate.is_dir() or (profiles / ".deleted" / raw).exists():
+        return None
+    return candidate
+
+
 @dataclass(frozen=True)
 class Layout:
     root: Path
