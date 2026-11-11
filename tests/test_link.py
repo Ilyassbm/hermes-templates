@@ -454,6 +454,31 @@ def test_an_empty_setting_falls_back_to_the_builtin_default(monkeypatch):
     assert pub._split_repo("", "login") == ("login", pub.DEFAULT_REPO)
 
 
+def test_the_bound_context_is_how_the_setting_is_read():
+    from agent_templates import settings as st
+
+    class Ctx:
+        def get_config(self, key, default=None):
+            return {"publish_repo": "team/templates"}.get(key, default)
+
+    st.bind(Ctx())
+    assert st.publish_repo() == "team/templates"
+    st.bind(None)                      # an unbound plugin falls back to the default
+    assert st.publish_repo() == ""
+
+
+def test_a_context_that_raises_is_not_fatal():
+    from agent_templates import settings as st
+
+    class Broken:
+        def get_config(self, key, default=None):
+            raise RuntimeError("no config here")
+
+    st.bind(Broken())
+    assert st.publish_repo() == ""
+    st.bind(None)
+
+
 def test_a_broken_config_never_breaks_publishing(monkeypatch):
     from agent_templates import settings as st
 

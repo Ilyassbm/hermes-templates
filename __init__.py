@@ -23,6 +23,8 @@ if str(_PLUGIN_DIR) not in sys.path:
 
 from template_cli import DESCRIPTION, HELP, handle_cli, setup_cli  # noqa: E402
 
+from agent_templates import settings as _settings  # noqa: E402
+
 SKILL_PATH = _PLUGIN_DIR / "skills" / "agent-templates" / "SKILL.md"
 SKILL_DESCRIPTION = (
     "Use when someone wants to share an agent as a template, or install one from a link "
@@ -32,6 +34,11 @@ SKILL_DESCRIPTION = (
 
 def register(ctx) -> None:
     """Plugin entry point, called by the Hermes plugin loader."""
+    try:
+        _settings.bind(ctx)  # documented door to this plugin's settings page values
+    except Exception:  # noqa: BLE001
+        log.exception("hermes-templates: could not bind the settings context")
+
     try:
         ctx.register_cli_command(
             name="template", help=HELP, description=DESCRIPTION,

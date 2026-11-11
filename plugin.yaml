@@ -1,7 +1,7 @@
 name: hermes-templates
 label: Agent Templates
 kind: standalone
-version: 1.2.3
+version: 1.2.4
 author: Ilyass Bm
 license: MIT
 description: >

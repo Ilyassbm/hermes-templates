@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.4 — catalog-clean
+
+- The settings value is read through the plugin context (`ctx.get_config`), bound at
+  `register()`, instead of importing the private `hermes_cli.plugins._plugin_settings_entry`.
+  One validator warning gone; a context that raises falls back to the default.
+- The only remaining validator warning is `agent.redact.redact_sensitive_text`, which the
+  current docs list on the **Public plugin API** page (the validator table in this build is
+  older than that entry).
+- 65 tests.
+
 ## 1.2.3 — publish with the profile's own token
 
 - The publish routes read the named profile's credentials (``?profile=``, which every

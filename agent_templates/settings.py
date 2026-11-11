@@ -20,16 +20,30 @@ PLUGIN_ID = "hermes-templates"
 DEFAULT_PUBLISH_REPO = "agent-templates"
 
 
-def _settings() -> dict[str, Any]:
-    try:
-        from hermes_cli.config import load_config_readonly
-        from hermes_cli.plugins import _plugin_settings_entry
+#: The plugin context bound at register(); its get_config() is the documented door
+#: to ``plugins.entries.<id>.settings``. Kept so no private core helper is imported.
+_CTX: Any = None
 
-        entry = _plugin_settings_entry(load_config_readonly() or {}, PLUGIN_ID) or {}
-    except Exception:  # noqa: BLE001 - outside Hermes, or a config we cannot parse
+
+def bind(ctx: Any) -> None:
+    """Called from ``register(ctx)``; after this the settings page is readable."""
+    global _CTX
+    _CTX = ctx
+
+
+def _settings() -> dict[str, Any]:
+    keys = ("publish_repo",)
+    if _CTX is None:
         return {}
-    settings = entry.get("settings")
-    return settings if isinstance(settings, dict) else {}
+    out: dict[str, Any] = {}
+    try:
+        for key in keys:
+            value = _CTX.get_config(key, None)
+            if value is not None:
+                out[key] = value
+    except Exception:  # noqa: BLE001 - a broken setting must never break publishing
+        return {}
+    return out
 
 
 def publish_repo() -> str:
