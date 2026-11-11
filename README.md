@@ -9,6 +9,54 @@ Share  → pick a profile → choose what travels → .htemplate  → send it (f
 Install→ paste the link, drop the file → preview → one click → new profile
 ```
 
+## Why not just `hermes profile export`?
+
+`hermes profile export` is a **backup**: it archives the profile directory (minus
+credential files) so you can restore the same agent on another machine. That is
+the right tool for moving *your* agent. It is the wrong tool for handing an agent
+to *someone else*, and a template is built for that.
+
+| | `hermes profile export` | `hermes template create` |
+| --- | --- | --- |
+| Purpose | Backup / move your own profile | Share an agent with other people |
+| What it packs | The whole directory: `workspace/`, `logs/`, `sessions/`, `memories/`, `state.db`, caches, plugin copies | A recipe: `SOUL.md`, config, skills, routines, MCP definitions, plugin ids. Memories only if you opt in |
+| Size / speed (measured, below) | 21.8 MB in 36 s for a small profile; no result after 6 min on a 12 GB profile | 0.29 MB in 0.7 s on the same small profile; 0.30 MB in 0.6 s on the 12 GB one |
+| Private data in the file | Conversation history, memories, logs, workspace files (957 of 1,569 paths in the measured export) | None: refused by path rule at any depth, text redacted, config stripped of accounts and endpoints |
+| Before you install | Nothing: `import` extracts it | `inspect` / the Install tab shows exactly what it carries, what it needs and what is missing |
+| Safety on install | Safe extraction (no path escapes, no links), but takes whatever the archive holds | Same extraction guarantees, plus: refuses credential paths, zip bombs and unknown top-level entries; every file must match its SHA-256 |
+| Routines | Come over as they were | Always arrive **paused** |
+| Plugins | Copied inside the archive | Only ids; enabled only if already installed on the target |
+| Keys to reconnect | You find out when it fails | Listed in the preview, with the exact `config set` command after install |
+| Install from a link | No: a local file only | Yes: `hermes template install https://…` or paste it in the Install tab |
+| Updating an installed copy | Re-import under a new name | `--force` updates the template files and leaves your data alone |
+| Name of the root agent | n/a | `default` is shared as `my-agent`, no reserved-name error |
+| Where | CLI | CLI **and** a Templates page (Share / Install, drag and drop) |
+
+**Simpler**: `hermes template create` with no argument packs the profile you are
+running as; the Share tab is one button. The install side needs no flags.
+
+**Faster**: the packer only reads the files a template may carry, so its cost does
+not depend on how much your agent has accumulated. The native export has to walk
+and compress all of it.
+
+**Use `hermes profile export` instead** when you want a faithful copy of *your own*
+agent including its memories, sessions and state. Templates deliberately cannot do
+that.
+
+### Measured on this repo's reference machine
+
+Same profiles, same box, cold run (`hermes profile export <name>` vs
+`hermes template create <name>`, wall clock including CLI start-up):
+
+| Profile | Export | Template |
+| --- | --- | --- |
+| small agent (5 skills, 5 routines) | 35.9 s · 21.8 MB · 1,569 files · 957 private-data paths | 4.2 s · 0.29 MB · 97 files · 0 private-data paths |
+| large agent (12 GB, 682,718 files on disk) | no result after 6 min | pack 0.58 s in-process · 0.30 MB · 84 files |
+
+Hermes' own start-up costs about 3.8 s on this machine whatever the command
+(`hermes template list`, which does no work, takes 3.8 s), and it is inside both
+columns. Packing itself is 0.6-0.7 s; inspecting a bundle takes about 10 ms.
+
 ## Install
 
 ```bash
@@ -104,7 +152,7 @@ directory; the CLI has no such limit (the person typing owns the file).
 ## Tests
 
 ```bash
-python -m pytest -q tests/          # 17 tests: packing, redaction, traversal, tamper, collisions
+python -m pytest -q tests/          # 23 tests: packing, redaction, traversal, tamper, collisions
 hermes plugins validate .
 node --check desktop/plugin.js
 ```

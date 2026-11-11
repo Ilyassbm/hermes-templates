@@ -14,7 +14,7 @@ from pathlib import Path
 
 from agent_templates import __version__, api, store
 from agent_templates.errors import TemplateError
-from agent_templates.profiles import hermes_home, list_profiles
+from agent_templates.profiles import current_profile, hermes_home, list_profiles
 
 HELP = "Share a whole agent as a template, or install one"
 DESCRIPTION = (
@@ -33,7 +33,8 @@ def setup_cli(parser) -> None:
     listing.add_argument("--json", action="store_true", help="Machine-readable output")
 
     create = sub.add_parser("create", help="Pack a profile into a .htemplate bundle")
-    create.add_argument("profile", help="Profile to pack ('default' for this home's own agent)")
+    create.add_argument("profile", nargs="?", default=None,
+                        help="Profile to pack (default: the profile you are running as)")
     create.add_argument("--out", help="Output file (default: plugin-data/hermes-templates/)")
     create.add_argument("--name", help="Template id (default: the profile name)")
     create.add_argument("--title", help="Display name")
@@ -114,7 +115,7 @@ def _list(home: Path, args) -> int:
 def _create(home: Path, args) -> int:
     result = api.create(
         home,
-        args.profile,
+        args.profile or current_profile(home),
         name=args.name or "",
         title=args.title or "",
         description=args.description or "",

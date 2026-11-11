@@ -12,7 +12,7 @@ before a single byte lands in a profile directory.
 
 from __future__ import annotations
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 BUNDLE_SUFFIX = ".htemplate"
 SCHEMA = "hermes-template/1"

@@ -238,7 +238,7 @@ function ShareTab({ profiles, onCreated }) {
   useEffect(() => {
     if (!profile) return
     setForm({
-      name: profile.id,
+      name: profile.suggested_name || profile.id,
       title: profile.description || profile.id,
       description: profile.description || '',
       author: form.author,

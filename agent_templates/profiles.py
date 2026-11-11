@@ -53,6 +53,20 @@ def layout(home: Path | None = None) -> Layout:
     return Layout(root=home, profiles_dir=home / "profiles", own=None)
 
 
+def current_profile(home: Path | None = None) -> str:
+    """The profile this process runs as (``default`` for the root home)."""
+    return layout(home or hermes_home()).own or "default"
+
+
+def suggest_name(home: Path, profile: str) -> str:
+    """A valid template id for *profile*. ``default`` is a reserved profile id, so the
+    root agent is shared as ``my-agent`` — one click, no error to decode."""
+    profile = (profile or "default").strip()
+    if profile in ("", "default"):
+        return "my-agent"
+    return profile
+
+
 def profile_path(home: Path, name: str) -> Path:
     """Directory of a profile, whichever home this process runs in."""
     name = (name or "default").strip()
@@ -150,6 +164,7 @@ def _summary(path: Path, name: str) -> dict:
     return {
         "id": name,
         "label": name,
+        "suggested_name": "my-agent" if name == "default" else name,
         "description": description,
         "has_soul": soul.is_file(),
         "soul_bytes": soul.stat().st_size if soul.is_file() else 0,

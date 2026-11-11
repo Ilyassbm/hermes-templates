@@ -312,3 +312,36 @@ def test_a_profile_home_sees_its_siblings(home: Path, tmp_path: Path):
     ids = [p["id"] for p in list_profiles(home / "profiles" / "testbot")]
     assert ids[:2] == ["testbot", "otherbot"]
     assert "default" not in ids  # no config.yaml at the root in this fixture
+
+
+def test_the_root_agent_can_be_shared_without_a_reserved_id(home: Path):
+    """`default` is a reserved profile id; sharing the root agent must still be one click."""
+    (home / "config.yaml").write_text("model:\n  default: x\n", encoding="utf-8")
+    (home / "SOUL.md").write_text("# root agent\n", encoding="utf-8")
+    result = build(home, "default")
+    assert result.manifest["name"] == "my-agent"
+    assert "SOUL.md" in _bundle_names(result.path)
+    entry = next(p for p in list_profiles(home) if p["id"] == "default")
+    assert entry["suggested_name"] == "my-agent"
+
+
+def test_create_defaults_to_the_profile_you_run_as(home: Path):
+    from agent_templates.profiles import current_profile
+
+    assert current_profile(home / "profiles" / "testbot") == "testbot"
+    assert current_profile(home) == "default"
+
+
+def test_nothing_private_in_a_bundle_even_with_a_heavy_profile(home: Path):
+    """The native export walks everything; a template must stay small and clean."""
+    profile = home / "profiles" / "testbot"
+    for sub in ("workspace", "logs", "cache", "image_cache", "sessions"):
+        (profile / sub).mkdir(parents=True, exist_ok=True)
+        for i in range(50):
+            (profile / sub / f"f{i}.txt").write_text("x" * 1000, encoding="utf-8")
+    (profile / "state.db").write_bytes(b"\0" * 200_000)
+    result = build(home, "testbot")
+    names = _bundle_names(result.path)
+    assert not any(n.split("/")[0] in {"workspace", "logs", "cache", "image_cache", "sessions"} for n in names)
+    assert "state.db" not in names
+    assert result.bytes < 50_000

@@ -19,7 +19,7 @@ from pathlib import Path
 from . import BUNDLE_SUFFIX
 from .errors import ProfileNotFound, TemplateError
 from .manifest import build_index, new_manifest
-from .profiles import profile_path
+from .profiles import profile_path, suggest_name
 from .safety import (
     MAX_BUNDLE_BYTES,
     MAX_FILE_BYTES,
@@ -93,7 +93,7 @@ def build(
     if not (source / "config.yaml").is_file():
         raise ProfileNotFound(f"profile {profile!r} not found at {source}")
 
-    template_name = validate_profile_name(name or profile)
+    template_name = validate_profile_name(name or suggest_name(home, profile))
     excluded: list[str] = []
     notes: list[str] = []
     redactions = 0
