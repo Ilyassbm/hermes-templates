@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.2 — a settings page in the Desktop
+
+- `config_schema` in `plugin.yaml`: the plugin now shows up under **Settings →
+  Plugins** in the Desktop app, with two real fields — *Publish repository*
+  (`owner/name`, empty means `agent-templates`) and *GitHub token* (`secret`,
+  stored in `.env` as `GITHUB_TOKEN`, never in `config.yaml`).
+- The publish default repository is read from that setting, with the explicit
+  argument still winning and the built-in default last.
+- Verified through `hermes_cli.plugins_settings.plugin_settings_fields`, the same
+  function the Desktop reads: two fields, correct types, secret carrying only its
+  env name and a presence flag.
+- 61 tests.
+
 ## 1.2.1 — readable in the dark
 
 - Fields were painted with `--ui-bg-input`, a token defined once and never

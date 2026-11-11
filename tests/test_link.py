@@ -434,3 +434,28 @@ def test_a_link_never_resolves_to_a_profile_installed_from_another_link(home: Pa
         assert other["installed_as"] == "" and other["name"] == "testbot"
     finally:
         server.shutdown()
+
+
+# ---------------------------------------------------------------- settings page
+
+def test_the_settings_page_supplies_the_default_repository(monkeypatch):
+    from agent_templates import publish as pub, settings as st
+
+    monkeypatch.setattr(st, "publish_repo", lambda: "someone/their-templates")
+    assert pub._split_repo("", "login") == ("someone", "their-templates")
+    # an explicit argument still wins over the setting
+    assert pub._split_repo("me/mine", "login") == ("me", "mine")
+
+
+def test_an_empty_setting_falls_back_to_the_builtin_default(monkeypatch):
+    from agent_templates import publish as pub, settings as st
+
+    monkeypatch.setattr(st, "publish_repo", lambda: "")
+    assert pub._split_repo("", "login") == ("login", pub.DEFAULT_REPO)
+
+
+def test_a_broken_config_never_breaks_publishing(monkeypatch):
+    from agent_templates import settings as st
+
+    monkeypatch.setattr(st, "_settings", lambda: {"publish_repo": 42})
+    assert st.publish_repo() == ""  # not a string -> ignore it, no exception

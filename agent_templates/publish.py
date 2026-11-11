@@ -32,6 +32,7 @@ import urllib.request
 from pathlib import Path
 
 from .errors import TemplateError
+from . import settings
 from .install import Bundle, fetch, open_bundle
 
 API = "https://api.github.com"
@@ -101,7 +102,8 @@ class GitHub:
 # ------------------------------------------------------------------ plan
 
 def _split_repo(repo: str, login: str) -> tuple[str, str]:
-    repo = (repo or DEFAULT_REPO).strip()
+    # explicit argument > the settings page (Settings → Plugins) > built-in default
+    repo = (repo or settings.publish_repo() or DEFAULT_REPO).strip()
     owner, _, name = repo.rpartition("/")
     owner = owner or login
     if not _REPO_RE.match(owner) or not _REPO_RE.match(name):

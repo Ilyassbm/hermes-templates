@@ -1,7 +1,7 @@
 name: hermes-templates
 label: Agent Templates
 kind: standalone
-version: 1.2.1
+version: 1.2.2
 author: Ilyass Bm
 license: MIT
 description: >
@@ -13,5 +13,16 @@ description: >
   always previews first, ships routines paused and never auto-enables a plugin. The Desktop app
   gets a Templates page with a Share tab and an Install tab (drag a bundle, or paste a link).
 requires_hermes: ">=0.23"
+config_schema:
+  publish_repo:
+    type: str
+    default: ""
+    label: "Publish repository"
+    description: "GitHub repository the Publish button writes to: owner/name, or a bare name under the token's owner. Empty means agent-templates."
+  github_token:
+    type: secret
+    env: GITHUB_TOKEN
+    label: "GitHub token"
+    description: "Fine-grained token with Contents: read and write (plus Administration: write if the repository must be created). Only needed to publish."
 provides_tools: []
 provides_hooks: []
