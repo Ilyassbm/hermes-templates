@@ -108,3 +108,19 @@ def save_upload(home: Path, data: bytes, filename: str = "upload.htemplate") -> 
     path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{name}"
     path.write_bytes(data)
     return path
+
+def record_publication(home: Path, template_id: str, result: dict) -> None:
+    """Keep the link next to the template so the page can show it again."""
+    data = load_registry(home)
+    for entry in data["templates"]:
+        if entry.get("id") == template_id:
+            entry["published"] = {
+                "url": result["url"],
+                "pinned_url": result["pinned_url"],
+                "page": result["page"],
+                "repo": result["repo_full"],
+                "version": result["version"],
+                "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            }
+            break
+    save_registry(home, data)

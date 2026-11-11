@@ -14,7 +14,6 @@ import os
 import shutil
 import tempfile
 import time
-import urllib.request
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,6 +21,7 @@ from pathlib import Path
 
 from .errors import InvalidBundle, ProfileExists, TemplateError, UnsafeBundle
 from .manifest import normalize, verify_index
+from .netsafe import open_url
 from .profiles import layout, plugins_dirs
 from .safety import (
     MAX_BUNDLE_BYTES,
@@ -52,21 +52,26 @@ class Bundle:
         return self.manifest["name"]
 
 
-def fetch(source: str, home: Path, *, timeout: int = 30, allow_path=None) -> Path:
-    """Resolve a link or a local path to a bundle file on disk."""
+def fetch(source: str, home: Path, *, timeout: int = 30, allow_path=None, restricted: bool = False) -> Path:
+    """Resolve a link or a local path to a bundle file on disk.
+
+    Links go through :mod:`netsafe` (scheme, public-host check when ``restricted``,
+    guarded redirects); the download is capped at MAX_BUNDLE_BYTES whatever the
+    server claims.
+    """
     source = (source or "").strip()
     if not source:
         raise TemplateError("no template source given")
     if source.startswith(("http://", "https://")):
         cache = Path(home) / "plugin-data" / "hermes-templates" / "downloads"
         cache.mkdir(parents=True, exist_ok=True)
+        _prune(cache)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         target = cache / f"download-{stamp}-{os.getpid()}.htemplate"
-        request = urllib.request.Request(source, headers={"User-Agent": "hermes-templates/1"})
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with open_url(source, timeout=timeout, restricted=restricted) as response:
                 length = response.headers.get("Content-Length")
-                if length and int(length) > MAX_BUNDLE_BYTES:
+                if length and length.isdigit() and int(length) > MAX_BUNDLE_BYTES:
                     raise TemplateError(f"bundle too large: {length} bytes")
                 written = 0
                 with open(target, "wb") as handle:
@@ -81,6 +86,7 @@ def fetch(source: str, home: Path, *, timeout: int = 30, allow_path=None) -> Pat
                             raise TemplateError("bundle too large while downloading")
                         handle.write(chunk)
         except TemplateError:
+            target.unlink(missing_ok=True)
             raise
         except Exception as exc:
             target.unlink(missing_ok=True)
@@ -93,6 +99,17 @@ def fetch(source: str, home: Path, *, timeout: int = 30, allow_path=None) -> Pat
     if not path.is_file():
         raise TemplateError(f"no template file at {path}")
     return path
+
+
+def _prune(cache: Path, *, keep_seconds: int = 24 * 3600) -> None:
+    """Downloads are only needed for the minute between Preview and Install."""
+    cutoff = time.time() - keep_seconds
+    for old in cache.glob("download-*.htemplate"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
 
 
 def open_bundle(path: Path) -> Bundle:
@@ -173,10 +190,42 @@ def open_bundle(path: Path) -> Bundle:
     return Bundle(path=path, manifest=manifest, names=sorted(names), bytes=path.stat().st_size)
 
 
-def preview(home: Path, bundle: Bundle, *, name: str = "") -> dict:
-    """What the installer will get, before anything is written."""
+def version_key(version: str) -> tuple:
+    """``1.10.0`` > ``1.9.0``: compare numbers, not strings. Unparseable parts sort lowest."""
+    out = []
+    for part in str(version).split("-")[0].split("+")[0].split("."):
+        out.append(int(part) if part.isdigit() else -1)
+    return tuple(out)
+
+
+def installed_info(target: Path) -> dict:
+    try:
+        return json.loads((target / MARKER).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def installed_from(home: Path, link: str) -> str:
+    """Name of the profile this machine already installed from *link*, or ``""``."""
+    if not link:
+        return ""
+    profiles_dir = layout(home).profiles_dir
+    if not profiles_dir.is_dir():
+        return ""
+    for entry in sorted(profiles_dir.iterdir()):
+        if entry.is_dir() and not entry.name.startswith(".") and installed_info(entry).get("source_url") == link:
+            return entry.name
+    return ""
+
+
+def preview(home: Path, bundle: Bundle, *, name: str = "", source_url: str = "") -> dict:
+    """What the installer will get, before anything is written.
+
+    With a link and no explicit name, a profile already installed from that same link
+    is the target: reopening the link then reads "update available", not "new template".
+    """
     home = Path(home)
-    target_name = validate_profile_name(name or bundle.name)
+    target_name = validate_profile_name(name or installed_from(home, source_url) or bundle.name)
     target = layout(home).profiles_dir / target_name
     exists = target.is_dir() and any((target / m).is_file() for m in ("config.yaml", "SOUL.md", "profile.yaml"))
     replaceable = exists and (target / MARKER).is_file()
@@ -203,6 +252,24 @@ def preview(home: Path, bundle: Bundle, *, name: str = "") -> dict:
     if exists and not replaceable:
         warnings.append(f"A profile named {target_name} already exists — pick another name.")
 
+    update = None
+    if replaceable:
+        current = installed_info(target)
+        have, offered = str(current.get("version") or ""), bundle.manifest["version"]
+        update = {
+            "from": have,
+            "to": offered,
+            "newer": version_key(offered) > version_key(have),
+            "same": version_key(offered) == version_key(have),
+            "source_url": str(current.get("source_url") or ""),
+        }
+        if update["newer"]:
+            warnings.insert(0, f"Update available: v{have or '?'} → v{offered}. Your data stays.")
+        elif update["same"]:
+            warnings.insert(0, f"Already at v{offered}.")
+        else:
+            warnings.insert(0, f"This is older (v{offered}) than what is installed (v{have}).")
+
     return {
         "name": target_name,
         "manifest": bundle.manifest,
@@ -215,6 +282,8 @@ def preview(home: Path, bundle: Bundle, *, name: str = "") -> dict:
         "target_path": str(target),
         "exists": exists,
         "replaceable": replaceable,
+        "update": update,
+        "installed_as": installed_from(home, source_url),
         "source": str(bundle.path),
     }
 
@@ -226,10 +295,15 @@ def install(
     name: str = "",
     force: bool = False,
     enable_plugins: bool = True,
+    source_url: str = "",
 ) -> dict:
-    """Write the bundle into a new profile. Returns what was installed."""
+    """Write the bundle into a new profile. Returns what was installed.
+
+    ``source_url`` is remembered next to the profile so a later preview of the same
+    link can say "update available" instead of looking like a new template.
+    """
     home = Path(home)
-    preview_data = preview(home, bundle, name=name)
+    preview_data = preview(home, bundle, name=name, source_url=source_url)
     target_name = preview_data["name"]
     target = layout(home).profiles_dir / target_name
     exists = preview_data["exists"]
@@ -254,7 +328,7 @@ def install(
 
     try:
         _extract(bundle, staging)
-        _prepare_profile(staging, bundle.manifest, target_name, enable_plugins, home)
+        _prepare_profile(staging, bundle.manifest, target_name, enable_plugins, home, source_url)
 
         problems = verify_index(staging, bundle.manifest["files"])
         if problems:
@@ -307,7 +381,7 @@ def _extract(bundle: Bundle, dest: Path) -> None:
 
 
 def _prepare_profile(
-    staging: Path, manifest: dict, name: str, enable_plugins: bool, home: Path
+    staging: Path, manifest: dict, name: str, enable_plugins: bool, home: Path, source_url: str = ""
 ) -> None:
     config_path = staging / "config.yaml"
     config = {}
@@ -351,6 +425,7 @@ def _prepare_profile(
         "version": manifest["version"],
         "title": manifest["title"],
         "author": manifest["author"],
+        "source_url": source_url if source_url.startswith(("http://", "https://")) else "",
         "installed_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "files": sorted(manifest["files"]),
     }

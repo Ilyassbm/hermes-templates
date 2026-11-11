@@ -1,7 +1,7 @@
 ---
 name: agent-templates
 description: "Use when sharing an agent as a template or installing one from a link (.htemplate)."
-version: 1.0.0
+version: 1.2.0
 author: hermes-templates plugin
 license: MIT
 metadata:
@@ -30,12 +30,52 @@ travel, and it is a publishing decision, not a convenience toggle.
 `--skill NAME` (repeatable) narrows the skills; `--no-cron`, `--no-mcp`,
 `--no-plugins`, `--no-skills` leave those out.
 
+## Publish a link
+
+```bash
+hermes template publish ./dex-1.0.0.htemplate          # plan, then a yes/no
+hermes template publish ./dex-1.0.0.htemplate -y       # no question
+```
+
+Publishing uploads the bundle to a GitHub repository (`/agent-templates` by
+default) and returns
+`https://raw.githubusercontent.com/<owner>/agent-templates/main/<name>/<name>.htemplate`.
+Publishing again **replaces the file at the same link**, so a link already sent
+stays the update channel. The tool downloads the published URL back and compares
+bytes before it shows the link; the result says `link verified: yes`.
+
+Needs `GITHUB_TOKEN` with *Contents: read and write* (plus *Administration: write*
+if the repository must be created). Read it from the secret store, never type it
+into a file:
+
+```bash
+hermes config set GITHUB_TOKEN <token>
+```
+
+Never create a repository on your own initiative: `--create-repo` (CLI) or the
+plan's confirmation (page) is the owner's yes, and the plan says the repository
+will be **public**.
+
+After an update, `raw.githubusercontent.com` may keep serving the old file for up
+to 5 minutes, per kind of client (measured: `curl` had the new one immediately,
+a request without `Accept-Encoding` kept the old one for the full five minutes; a
+query string does not bypass it). Hand out the commit-pinned URL when the update
+has to land instantly.
+
 ## Inspect and install
 
 ```bash
 hermes template inspect ./dex-1.0.0.htemplate   # everything it carries, before anything is written
 hermes template install ./dex-1.0.0.htemplate --name dex-copy
+hermes template install https://raw.githubusercontent.com/…/dex.htemplate
 ```
+
+A link is a first-class source: the bundle is downloaded to
+`plugin-data/hermes-templates/downloads/`, opened without extracting, and nothing
+is written before you confirm. The link is remembered in the installed profile's
+`.hermes-template.json`; reopening the same link then reads
+`Update available: v1.0.0 → v1.1.0` instead of asking for a new name, and the
+update keeps memories, sessions and `.env`.
 
 Install refuses rather than guesses:
 

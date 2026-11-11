@@ -6,6 +6,8 @@ GET  /file/<id>             the bundle itself, as a download
 POST /create                pack a profile into a bundle
 POST /preview               inspect a link, a path or an uploaded bundle
 POST /install               install after a preview
+POST /publish/plan          read-only: what Publish would write and where
+POST /publish               upload the bundle to GitHub, return the install link
 
 Nothing here reads outside the Hermes home and the user's home directory, and
 no route returns a credential: the packer never stores one in the first place.
@@ -125,6 +127,27 @@ async def install(body: dict = _BODY):
             force=bool(body.get("force", False)),
             enable_plugins=bool(body.get("enable_plugins", True)),
             restricted=True,
+        )
+    except TemplateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@router.post("/publish/plan")
+async def publish_plan(body: dict = _BODY):
+    """Read-only: what Publish would write, where, and whether it would create a repository."""
+    try:
+        return api.publish_plan(_home(), str(body.get("id") or ""), str(body.get("repo") or ""))
+    except TemplateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/publish")
+async def publish(body: dict = _BODY):
+    try:
+        return api.publish(
+            _home(),
+            str(body.get("id") or ""),
+            str(body.get("repo") or ""),
+            create_repo=bool(body.get("create_repo", False)),
         )
     except TemplateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -26,6 +26,7 @@ const tap = (kind) => {
 }
 
 let rest = null
+let osDoor = null // ctx.os: clipboard + open-external, scoped by the host
 
 const ROUTES = ROUTES_AREA || 'routes'
 const SIDEBAR_NAV = SIDEBAR_NAV_AREA || 'sidebar.nav'
@@ -168,12 +169,27 @@ function Button({ children, onClick, primary, disabled, title }) {
 
 async function copy(text) {
   try {
+    if (osDoor && typeof osDoor.writeClipboard === 'function') {
+      if (await osDoor.writeClipboard(text)) {
+        tap('tap')
+        return true
+      }
+    }
     await navigator.clipboard.writeText(text)
     tap('tap')
     return true
   } catch (e) {
     return false
   }
+}
+
+function openLink(url) {
+  try {
+    if (osDoor && typeof osDoor.openExternal === 'function') return osDoor.openExternal(url)
+  } catch (e) {
+    /* fall through */
+  }
+  return window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 // The gateway socket arrives after the first render on Desktop: the first RPC
@@ -218,6 +234,132 @@ function readFileBase64(file) {
     }
     reader.readAsDataURL(file)
   })
+}
+
+// ---------------------------------------------------------------- Publish (the link)
+
+const errText = (e) => String((e && e.message) || e).replace(/^\d{3}:\s*/, '').replace(/^\{"detail":"(.*)"\}$/, '$1')
+
+function CopyButton({ text, label, done }) {
+  const [state, setState] = useState(false)
+  return jsx(Button, {
+    onClick: async () => {
+      const ok = await copy(text)
+      setState(ok)
+      setTimeout(() => setState(false), 1600)
+    }
+  }, state ? (done || 'Copied') : label)
+}
+
+// Share ▸ Publish: read the plan, show exactly what will be written where, ask once, then hand back the link.
+function PublishPanel({ templateId, onPublished }) {
+  const [phase, setPhase] = useState('idle') // idle | planning | confirm | publishing | done
+  const [plan, setPlan] = useState(null)
+  const [out, setOut] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => { setPhase('idle'); setPlan(null); setOut(null); setError('') }, [templateId])
+
+  const start = async () => {
+    setPhase('planning')
+    setError('')
+    try {
+      const data = await requestReady(() => rest('/publish/plan', { method: 'POST', body: { id: templateId } }))
+      setPlan(data)
+      setPhase('confirm')
+    } catch (e) {
+      setError(errText(e))
+      setPhase('idle')
+    }
+  }
+
+  const confirm = async () => {
+    setPhase('publishing')
+    setError('')
+    try {
+      const data = await rest('/publish', {
+        method: 'POST',
+        body: { id: templateId, create_repo: !!(plan && plan.creates_repo) }
+      })
+      setOut(data)
+      setPhase('done')
+      tap('success')
+      if (onPublished) onPublished(data)
+    } catch (e) {
+      setError(errText(e))
+      setPhase('confirm')
+    }
+  }
+
+  if (phase === 'done' && out) {
+    return jsxs('div', {
+      style: { borderTop: `1px solid ${T.border}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }
+    }, [
+      jsxs('div', { key: 'h', style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } }, [
+        jsx('span', { key: 't', style: { fontSize: 13, fontWeight: 600, color: T.ok } },
+          out.updated ? `Updated v${out.version} — same link` : `Published v${out.version}`),
+        out.created_repo ? jsx(Chip, { key: 'r' }, `created ${out.repo_full}`) : null,
+        jsx(Chip, { key: 'v', tone: out.verified ? 'ok' : 'warn' }, out.verified ? 'link checked' : 'link not checked')
+      ]),
+      jsx('code', {
+        key: 'u',
+        style: {
+          fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 11.5, color: T.text, background: T.input,
+          border: `1px solid ${T.stroke}`, borderRadius: 6, padding: '7px 9px', wordBreak: 'break-all', userSelect: 'all'
+        }
+      }, out.url),
+      jsxs('div', { key: 'b', style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, [
+        jsx(CopyButton, { key: 'c', text: out.url, label: 'Copy link' }),
+        jsx(CopyButton, { key: 'm', text: out.share_text, label: 'Copy message', done: 'Message copied' }),
+        jsx(Button, { key: 'o', onClick: () => openLink(out.page) }, 'View on GitHub')
+      ]),
+      out.propagation_note ? jsx(Notice, { key: 'pn', tone: 'warn' }, out.propagation_note) : null,
+      out.propagation_note ? jsx('div', { key: 'pl' }, jsx(CopyButton, { text: out.pinned_url, label: 'Copy the immediate link', done: 'Copied' })) : null,
+      jsx('div', { key: 'n', style: { fontSize: 11.5, color: T.faint, lineHeight: 1.55 } },
+        'Whoever has the link pastes it in Templates ▸ Install (or runs hermes template install). Publish again to update it — the link stays the same.')
+    ])
+  }
+
+  if (phase === 'confirm' && plan) {
+    const blocked = !plan.ready
+    return jsxs('div', {
+      style: { borderTop: `1px solid ${T.border}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 7 }
+    }, [
+      jsx('div', { key: 'l', style: S.label }, 'Publish — check before it goes out'),
+      blocked
+        ? jsx('div', { key: 'p', style: { display: 'flex', flexDirection: 'column' } },
+            plan.problems.map((problem, i) => jsx(Notice, { key: i, tone: 'bad' }, problem)))
+        : jsxs('div', { key: 'd', style: { display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12, color: T.dim, lineHeight: 1.55 } }, [
+            jsx('div', { key: '1' }, `Writes ${plan.path} (+ a README) to ${plan.repo_full}, branch ${plan.branch}.`),
+            jsx('div', { key: '2' }, plan.overwrites ? 'Replaces the version at this link; everyone using it will see an update.' : 'New file.'),
+            plan.creates_repo
+              ? jsx(Notice, { key: '3', tone: 'warn' }, `${plan.repo_full} does not exist: it will be created as a PUBLIC repository.`)
+              : null,
+            jsx('div', { key: '4' }, ['Link: ', jsx('code', { key: 'c', style: { fontFamily: 'var(--ui-font-mono, monospace)', fontSize: 11, wordBreak: 'break-all', overflowWrap: 'anywhere' } }, plan.url)]),
+            jsx('div', { key: '5', style: { color: T.faint } },
+              `Anyone with the link can read the ${plan.files} files in this bundle (${bytes(plan.bytes)}). It holds no credentials, sessions or history.`)
+          ]),
+      plan.needs_token
+        ? jsx('div', { key: 'cmd' }, jsx(CopyButton, { text: 'hermes config set GITHUB_TOKEN <your token>', label: 'Copy the command', done: 'Copied' }))
+        : null,
+      error ? jsx(Notice, { key: 'e', tone: 'bad' }, error) : null,
+      jsxs('div', { key: 'a', style: { display: 'flex', gap: 8 } }, [
+        blocked ? null : jsx(Button, { key: 'go', primary: true, onClick: confirm }, plan.creates_repo ? 'Create repository & publish' : 'Publish'),
+        jsx(Button, { key: 'x', onClick: () => { setPhase('idle'); setError('') } }, blocked ? 'Close' : 'Cancel')
+      ])
+    ])
+  }
+
+  return jsxs('div', {
+    style: { borderTop: `1px solid ${T.border}`, paddingTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }
+  }, [
+    jsx(Button, {
+      key: 'p', primary: true, onClick: start,
+      disabled: phase === 'planning' || phase === 'publishing'
+    }, phase === 'planning' ? 'Checking…' : phase === 'publishing' ? 'Publishing…' : 'Publish & get a link'),
+    jsx('span', { key: 'h', style: { fontSize: 11.5, color: T.faint } }, 'One link anyone can paste in Install.'),
+    error ? jsx(Notice, { key: 'e', tone: 'bad' }, error) : null
+  ])
 }
 
 // ---------------------------------------------------------------- Share
@@ -421,8 +563,7 @@ function ShareTab({ profiles, onCreated }) {
             ? jsx('div', { key: 'notes', style: { display: 'flex', flexDirection: 'column' } },
                 result.notes.map((note, i) => jsx('div', { key: i, style: { fontSize: 11.5, color: T.dim, lineHeight: 1.5 } }, `· ${note}`)))
             : null,
-          jsx('div', { key: 'share', style: { fontSize: 11.5, color: T.faint, lineHeight: 1.55 } },
-            'To share it as a link: upload the downloaded .htemplate anywhere that serves HTTPS (a gist, your site, a bucket) and send that URL. Whoever opens it pastes the link in Install.')
+          jsx(PublishPanel, { key: 'publish', templateId: result.id })
         ]) : null
       ])
     ]
@@ -430,6 +571,14 @@ function ShareTab({ profiles, onCreated }) {
 }
 
 // ---------------------------------------------------------------- Install
+
+function installLabel(preview, target) {
+  if (!preview.exists || target !== preview.name) return 'Install'
+  const u = preview.update
+  if (u && u.newer) return `Update to v${u.to}`
+  if (u && u.same) return 'Reinstall'
+  return 'Replace'
+}
 
 function InstallTab() {
   const [source, setSource] = useState('')
@@ -456,7 +605,7 @@ function InstallTab() {
     try {
       const data = await requestReady(() => rest('/preview', { method: 'POST', body: payload }))
       setPreview(data)
-      setTarget(data.name)
+      setTarget(data.exists && !data.replaceable ? `${data.name}-copy` : data.name)
       tap('tap')
     } catch (e) {
       setPreview(null)
@@ -524,7 +673,17 @@ function InstallTab() {
             placeholder: 'https://… .htemplate, or /path/to/file.htemplate',
             value: source,
             onChange: (e) => { setSource(e.target.value); setUpload(null); setPreview(null) },
-            onKeyDown: (e) => { if (e.key === 'Enter' && source) inspect({ source }) }
+            onKeyDown: (e) => { if (e.key === 'Enter' && source) inspect({ source }) },
+            onPaste: (e) => {
+              // A pasted link is the whole gesture: no second click on Preview.
+              const text = String((e.clipboardData && e.clipboardData.getData('text')) || '').trim()
+              if (/^https?:\/\/\S+$/.test(text)) {
+                e.preventDefault()
+                setSource(text)
+                setUpload(null)
+                inspect({ source: text })
+              }
+            }
           }),
           jsx(Button, { key: 'b', onClick: () => inspect({ source }), disabled: busy || !source }, busy ? 'Checking…' : 'Preview')
         ]),
@@ -621,7 +780,7 @@ function InstallTab() {
           jsx(Button, {
             key: 'go', primary: true, onClick: install,
             disabled: busy || !target
-          }, busy ? 'Installing…' : preview.exists && target === preview.name ? 'Update' : 'Install')
+          }, busy ? 'Installing…' : installLabel(preview, target))
         ])
       ]) : null,
 
@@ -726,6 +885,7 @@ export default {
   name: 'Agent Templates',
   register(ctx) {
     rest = ctx.rest
+    osDoor = ctx.os || null
 
     ctx.register({
       id: 'page',

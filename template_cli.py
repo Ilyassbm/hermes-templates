@@ -51,6 +51,16 @@ def setup_cli(parser) -> None:
                         help="Include memories/MEMORY.md and USER.md (they are readable by whoever installs)")
     create.add_argument("--json", action="store_true", help="Machine-readable output")
 
+    publish = sub.add_parser(
+        "publish", help="Publish a template to GitHub and print the link that installs it")
+    publish.add_argument("what", nargs="?", default=None,
+                         help="A profile to pack and publish (default: the profile you run as), or a .htemplate file")
+    publish.add_argument("--repo", default="", help="GitHub repository, name or owner/name (default: <you>/agent-templates)")
+    publish.add_argument("--create-repo", action="store_true",
+                         help="Allow creating the repository (public) if it does not exist")
+    publish.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation")
+    publish.add_argument("--json", action="store_true")
+
     inspect = sub.add_parser("inspect", help="Show exactly what a bundle carries, before installing")
     inspect.add_argument("source", help="Bundle path or https:// link")
     inspect.add_argument("--json", action="store_true")
@@ -73,6 +83,8 @@ def handle_cli(args) -> int:
             return _list(home, args)
         if action == "create":
             return _create(home, args)
+        if action == "publish":
+            return _publish(home, args)
         if action == "inspect":
             return _inspect(home, args)
         if action == "install":
@@ -80,7 +92,7 @@ def handle_cli(args) -> int:
     except TemplateError as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 1
-    print("usage: hermes template {list|create|inspect|install}", file=sys.stderr)
+    print("usage: hermes template {list|create|publish|inspect|install}", file=sys.stderr)
     return 2
 
 
@@ -214,4 +226,68 @@ def _install(home: Path, args) -> int:
     print(f"  start it with: hermes -p {result['profile']} chat")
     for step in result.get("next_steps") or []:
         print(f"  connect a key: {step}")
+    return 0
+
+def _publish(home: Path, args) -> int:
+    from agent_templates import publish as publisher
+
+    target = args.what
+    candidate = Path(target).expanduser() if target else None
+    if candidate is not None and candidate.is_file():
+        bundle_path, template_id = candidate, ""
+    else:
+        built = api.create(home, target or current_profile(home))
+        bundle_path, template_id = Path(built["path"]), built["id"]
+        if not args.json:
+            manifest = built["manifest"]
+            print(f"✓ packed {manifest['title']} v{manifest['version']} — {built['files']} files, "
+                  f"{built['bytes'] / 1024:.0f} KB, {built['redactions']} redaction(s)")
+
+    plan = publisher.plan(bundle_path, repo=args.repo)
+    if plan["problems"]:
+        for problem in plan["problems"]:
+            print(f"✗ {problem}", file=sys.stderr)
+        return 1
+
+    if not args.json:
+        print(f"\nThis will publish to {plan['repo_full']} (branch {plan['branch']}):")
+        print(f"  {plan['path']}  (+ README.md next to it)")
+        print(f"  {'overwrites the current version at the same link' if plan['overwrites'] else 'new file'}")
+        if plan.get("creates_repo"):
+            print(f"  ! {plan['repo_full']} does not exist: it will be created as a PUBLIC repository")
+        print(f"  link: {plan['url']}")
+        print("  Anyone with the link can read the bundle. It contains no credentials, sessions or history.")
+
+    if plan.get("creates_repo") and not args.create_repo:
+        if args.yes or not sys.stdin.isatty():
+            print("✗ the repository does not exist; pass --create-repo to allow creating it", file=sys.stderr)
+            return 1
+        if input(f"Create the public repository {plan['repo_full']}? [y/N] ").strip().lower() not in ("y", "yes", "o", "oui"):
+            print("cancelled")
+            return 1
+        args.create_repo = True
+    elif not args.yes:
+        if not sys.stdin.isatty():
+            print("✗ refusing to publish without confirmation (pass -y in a script)", file=sys.stderr)
+            return 1
+        if input("Publish? [y/N] ").strip().lower() not in ("y", "yes", "o", "oui"):
+            print("cancelled")
+            return 1
+
+    result = publisher.publish(bundle_path, repo=args.repo, create_repo=args.create_repo, home=home)
+    if template_id:
+        store.record_publication(home, template_id, result)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    print(f"\n✓ published {result['title']} v{result['version']}"
+          f"{' (repository created)' if result['created_repo'] else ''}"
+          f"{' — updated at the same link' if result['updated'] else ''}")
+    print(f"  link verified: {'yes' if result['verified'] else 'NO'}")
+    if result.get("propagation_note"):
+        print(f"  ! {result['propagation_note']}")
+        print(f"    immediate: {result['pinned_url']}")
+    print(f"\n{result['url']}\n")
+    print("Share this:\n")
+    print("  " + result["share_text"].replace("\n", "\n  "))
     return 0

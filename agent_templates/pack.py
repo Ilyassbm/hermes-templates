@@ -197,7 +197,7 @@ def build(
     return BuildResult(
         path=out,
         manifest=manifest,
-        files=len(index),
+        files=len(index) + 1,  # + template.yaml: the number inspect and the archive report
         bytes=size,
         redactions=redactions,
         excluded=sorted(excluded)[:40],

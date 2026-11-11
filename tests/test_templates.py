@@ -345,3 +345,9 @@ def test_nothing_private_in_a_bundle_even_with_a_heavy_profile(home: Path):
     assert not any(n.split("/")[0] in {"workspace", "logs", "cache", "image_cache", "sessions"} for n in names)
     assert "state.db" not in names
     assert result.bytes < 50_000
+
+
+def test_the_reported_file_count_is_what_the_archive_and_the_preview_say(home: Path):
+    result = build(home, "testbot")
+    assert result.files == len(_bundle_names(result.path))
+    assert len(api.inspect(home, str(result.path))["files"]) == result.files

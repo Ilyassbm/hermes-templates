@@ -5,9 +5,13 @@ click. Inspired by Grok Bot templates: identity, skills, routines, memory and
 plugin ids travel; credentials, sessions and history never do.
 
 ```
-Share  → pick a profile → choose what travels → .htemplate  → send it (file or link)
-Install→ paste the link, drop the file → preview → one click → new profile
+Share   → pick a profile → choose what travels → .htemplate
+Publish → one click → https://…/your-agent.htemplate  (same link for every update)
+Install → paste the link → preview → one click → new profile
 ```
+
+The link is the product: one URL that anyone can paste, in the page or in the
+CLI, and that keeps working when you publish a new version of the agent.
 
 ## Why not just `hermes profile export`?
 
@@ -28,7 +32,8 @@ to *someone else*, and a template is built for that.
 | Plugins | Copied inside the archive | Only ids; enabled only if already installed on the target |
 | Keys to reconnect | You find out when it fails | Listed in the preview, with the exact `config set` command after install |
 | Install from a link | No: a local file only | Yes: `hermes template install https://…` or paste it in the Install tab |
-| Updating an installed copy | Re-import under a new name | `--force` updates the template files and leaves your data alone |
+| Updating an installed copy | Re-import under a new name | Reopen the same link: the preview reads "Update v1.0.0 → v1.1.0", and the update keeps memories, sessions and `.env` |
+| Sending it to someone | Attach the archive, explain what to extract where | One link: `hermes template install https://…`, or paste it in Templates ▸ Install |
 | Name of the root agent | n/a | `default` is shared as `my-agent`, no reserved-name error |
 | Where | CLI | CLI **and** a Templates page (Share / Install, drag and drop) |
 
@@ -57,6 +62,43 @@ Hermes' own start-up costs about 3.8 s on this machine whatever the command
 (`hermes template list`, which does no work, takes 3.8 s), and it is inside both
 columns. Packing itself is 0.6-0.7 s; inspecting a bundle takes about 10 ms.
 
+## The link
+
+Publishing puts the bundle in a GitHub repository you own and gives back a
+permanent raw URL:
+
+```
+https://raw.githubusercontent.com/<you>/agent-templates/main/<name>/<name>.htemplate
+```
+
+```bash
+hermes template publish out.htemplate         # shows the plan, asks, uploads
+hermes template publish out.htemplate -y      # no question (CI)
+```
+
+In the page: **Templates ▸ Share ▸ Publish & get a link**. It reads a plan first
+(which repository, which path, whether it replaces a version, whether the
+repository has to be created as **public**) and only then writes anything.
+
+- **One link per agent.** Publishing again updates the file at the same URL, so a
+  link you already sent stays valid. Delete the file or the repository to revoke.
+- **Proven before it is handed to you.** After the upload the tool downloads the
+  published URL through the same guarded fetcher an installer uses and compares
+  bytes with what it uploaded; the result says `link verified: yes`.
+- **Token.** `hermes config set GITHUB_TOKEN <token>` — a fine-grained token with
+  *Contents: read and write*, plus *Administration: write* when the repository has
+  to be created. It is read through `agent.secret_scope`: never logged, never
+  stored in a bundle, never returned in a result or an error.
+- **Cache.** `raw.githubusercontent.com` serves these URLs with
+  `cache-control: max-age=300`, and the cache is keyed per client. Measured here:
+  right after an update, `curl` already had the new file while a request without
+  `Accept-Encoding` still got the old one for the full five minutes (a query
+  string does not bypass it). The result therefore also gives the commit-pinned
+  URL (`…/<sha>/…`), which is immutable and immediate; the branch link settles.
+- **No repository yet?** The page asks before creating it, and says it will be
+  public. Without *Administration: write* the publish stops and prints the one
+  manual step instead of failing halfway.
+
 ## Install
 
 ```bash
@@ -77,8 +119,9 @@ once, or it stays hidden.
   skipping every credential, session and cache path.
 - **Filesystem, write**: a new profile directory under `$HERMES_HOME/profiles/`,
   and its own bundles under `$HERMES_HOME/plugin-data/hermes-templates/`.
-- **Network**: one HTTPS GET, only to a URL you paste, only when you press
-  Preview or Install. Nothing is fetched at startup, on a timer or in the
+- **Network**: one HTTPS GET to a URL you paste (on Preview/Install), and — only
+  when you press Publish — the GitHub REST API to upload the bundle and download
+  it back to prove the link. Nothing is fetched at startup, on a timer or in the
   background; no telemetry, no update check, no third-party service.
 - **No shell**: nothing is executed on behalf of a bundle. Skills, `SOUL.md` and
   routines land as files, and routines are written paused.
@@ -93,7 +136,12 @@ hermes template list
 hermes template create <profile> [--out out.htemplate] [--with-memories] [--skill NAME]…
 hermes template inspect <file-or-https-link>
 hermes template install <file-or-https-link> [--name NAME] [--force] [-y]
+hermes template publish <file.htemplate> [--repo owner/name] [--create-repo] [-y]
 ```
+
+`--repo` defaults to `<you>/agent-templates`. `--create-repo` is the CLI's explicit
+"yes, create it" (the page asks in the plan instead); without it, publishing to a
+repository that does not exist stops and prints the one manual step.
 
 ## What travels
 
@@ -133,6 +181,16 @@ click" path.
 - **After install** — routines are paused, plugins are only enabled when they
   exist here, `.env.EXAMPLE` lists the keys to reconnect, and a profile that was
   not created from a template is never overwritten.
+- **Publish side** — the bundle is re-verified right before the upload, the plan is
+  read-only, a repository is never created without an explicit yes, a private
+  repository is refused (nobody could open the link), and the token travels only
+  in an `Authorization` header.
+- **Links** — the page fetches HTTPS only, public hosts only (no loopback, no
+  private range, no link-local or metadata address), no credentials in the URL,
+  and every redirect is re-checked so it cannot jump inside the network or
+  downgrade to `http`. The CLI is looser on purpose (your own machine, a bundle
+  served on your LAN) but still http(s) only and still re-checks redirects.
+- **Size** — a download is capped at 20 MB whatever the server claims.
 
 ## Backend routes (`/api/plugins/hermes-templates`)
 
@@ -145,6 +203,8 @@ click" path.
 | `POST /create` | pack a profile |
 | `POST /preview` | inspect a link, a path, or uploaded bytes |
 | `POST /install` | install after a preview |
+| `POST /publish/plan` | read-only: what publishing this template would write, and where |
+| `POST /publish` | upload, prove the link, remember it next to the template |
 
 The page may read a bundle only from `$HERMES_HOME` or the user's home
 directory; the CLI has no such limit (the person typing owns the file).
@@ -152,15 +212,36 @@ directory; the CLI has no such limit (the person typing owns the file).
 ## Tests
 
 ```bash
-python -m pytest -q tests/          # 23 tests: packing, redaction, traversal, tamper, collisions
+python -m pytest -q tests/          # 58 tests
 hermes plugins validate .
 node --check desktop/plugin.js
 ```
 
+`tests/test_templates.py` covers packing, redaction, traversal, tamper and
+collisions. `tests/test_link.py` covers the link: unsafe URLs refused (scheme,
+credentials, loopback, private ranges, redirect that downgrades or jumps inside),
+the download cap, versions compared as numbers, install-from-link remembering its
+source, the update offer on the same link, and publishing against a fake GitHub
+(no token, read-only plan, private repository refused, token that cannot create
+repositories, a bundle carrying a credential never uploaded, republish at the same
+link, and the token only ever present in the `Authorization` header).
+
 
 ## Screenshots
 
+Share: pick a profile, choose what travels, create the bundle.
+
 ![Share tab](docs/share-tab.png)
+
+Publish: the plan says exactly what would be written, and where, before anything is.
+
+![Publish plan](docs/publish-plan.png)
+
+The link, proven by downloading it back.
+
+![Published link](docs/publish-link.png)
+
+Install: paste the link, the update is offered on its own.
 
 ![Install tab](docs/install-tab.png)
 
@@ -189,7 +270,9 @@ Removing it would mean shipping our own redactor, which is the worse trade.
 ```
 __init__.py              plugin entry: CLI command + skill
 template_cli.py          `hermes template …`
-agent_templates/         packer, installer, safety rules, manifest, store
+agent_templates/         packer, installer, publisher, safety rules, manifest, store
+agent_templates/netsafe.py   URL guard for downloads (scheme, host, redirects, cap)
+agent_templates/publish.py   GitHub upload + proof of the link
 dashboard/plugin_api.py  REST namespace for the page
 desktop/plugin.js        Templates page (Share + Install), no build step
 skills/agent-templates/  what a bot reads before using it

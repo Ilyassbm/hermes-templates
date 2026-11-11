@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
+from . import publish as publisher
 from . import store
 from .errors import TemplateError
 from .install import Bundle, fetch, install, open_bundle, preview
@@ -96,7 +97,7 @@ def resolve_source(
         except Exception as exc:
             raise TemplateError(f"upload is not valid base64: {exc}") from exc
         return store.save_upload(home, raw, filename or "upload.htemplate")
-    return fetch(source, home, allow_path=_allowed_path(home) if restricted else None)
+    return fetch(source, home, allow_path=_allowed_path(home) if restricted else None, restricted=restricted)
 
 
 def inspect(
@@ -105,7 +106,8 @@ def inspect(
 ) -> dict:
     path = resolve_source(home, source, data_base64, filename, restricted=restricted)
     bundle = open_bundle(path)
-    return preview(home, bundle, name=name)
+    link = source.strip() if source.strip().startswith(("http://", "https://")) else ""
+    return preview(home, bundle, name=name, source_url=link)
 
 
 def apply(
@@ -121,7 +123,8 @@ def apply(
 ) -> dict:
     path = resolve_source(home, source, data_base64, filename, restricted=restricted)
     bundle: Bundle = open_bundle(path)
-    return install(home, bundle, name=name, force=force, enable_plugins=enable_plugins)
+    link = source.strip() if source.strip().startswith(("http://", "https://")) else ""
+    return install(home, bundle, name=name, force=force, enable_plugins=enable_plugins, source_url=link)
 
 
 def library(home: Path) -> list[dict]:
@@ -134,3 +137,20 @@ def bundle_bytes(home: Path, template_id: str) -> tuple[str, bytes]:
         raise TemplateError("that template is no longer on disk")
     path = Path(entry["path"])
     return path.name, path.read_bytes()
+
+def _library_path(home: Path, template_id: str) -> Path:
+    entry = store.find(home, template_id)
+    if not entry:
+        raise TemplateError("that template is no longer on disk")
+    return Path(entry["path"])
+
+
+def publish_plan(home: Path, template_id: str, repo: str = "") -> dict:
+    """What Publish would do, read-only (nothing is written, nothing is created)."""
+    return publisher.plan(_library_path(home, template_id), repo=repo)
+
+
+def publish(home: Path, template_id: str, repo: str = "", create_repo: bool = False) -> dict:
+    result = publisher.publish(_library_path(home, template_id), repo=repo, create_repo=create_repo, home=home)
+    store.record_publication(home, template_id, result)
+    return result
