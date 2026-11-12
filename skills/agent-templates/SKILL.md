@@ -1,7 +1,7 @@
 ---
 name: agent-templates
 description: "Use when sharing an agent as a template or installing one from a link (.htemplate)."
-version: 1.2.0
+version: 1.3.0
 author: hermes-templates plugin
 license: MIT
 metadata:
@@ -65,7 +65,8 @@ has to land instantly.
 ## Inspect and install
 
 ```bash
-hermes template inspect ./dex-1.0.0.htemplate   # everything it carries, before anything is written
+hermes template inspect ./dex-1.0.0.htemplate   # SOUL.md, skills, routines, MCP commands — before anything is written
+hermes template inspect ./dex-1.0.0.htemplate --file SOUL.md   # one file in full
 hermes template install ./dex-1.0.0.htemplate --name dex-copy
 hermes template install https://raw.githubusercontent.com/…/dex.htemplate
 ```
@@ -83,8 +84,10 @@ Install refuses rather than guesses:
   is refused, and the refusal names the file;
 - every file must match its SHA-256 in `template.yaml`, so a bundle edited after
   it was built is refused;
-- routines arrive **paused**; plugins are only enabled when they are installed
-  on this machine, and the rest are listed as missing;
+- routines arrive **paused** through Hermes' cron import, MCP servers arrive
+  **disabled**, and the config is sanitized again on install;
+- plugins already installed on this machine are enabled (`--no-enable-plugins`
+  keeps them off), and the rest are listed as missing;
 - an existing profile is never overwritten unless it was installed from a
   template (`--force` updates that one, user data stays).
 

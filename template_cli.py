@@ -21,8 +21,9 @@ DESCRIPTION = (
     "A template is a recipe of an agent — identity (SOUL.md), configuration, skills, routines, "
     "MCP servers, memories the author publishes, and plugin ids — packaged as one .htemplate file "
     "or link. Credentials, sessions, conversation history, logs and caches never travel, and every "
-    "text file is redacted before it is packed. Install always previews first: routines arrive "
-    "paused and plugins are never auto-enabled."
+    "text file is redacted before it is packed. Install always previews first and shows what will run: "
+    "routines arrive paused, MCP servers arrive disabled, the config is sanitized again, and plugins this "
+    "machine already has are enabled (pass --no-enable-plugins to keep them off)."
 )
 
 
@@ -64,6 +65,7 @@ def setup_cli(parser) -> None:
     inspect = sub.add_parser("inspect", help="Show exactly what a bundle carries, before installing")
     inspect.add_argument("source", help="Bundle path or https:// link")
     inspect.add_argument("--json", action="store_true")
+    inspect.add_argument("--file", metavar="PATH", help="Print one file of the bundle in full (e.g. SOUL.md)")
 
     install = sub.add_parser("install", help="Install a bundle as a new profile")
     install.add_argument("source", help="Bundle path or https:// link")
@@ -166,6 +168,18 @@ def _create(home: Path, args) -> int:
 
 def _inspect(home: Path, args) -> int:
     data = api.inspect(home, args.source)
+    if getattr(args, "file", None):
+        from agent_templates.peek import view
+        from agent_templates.install import open_bundle
+
+        shown = view(open_bundle(Path(data["source"])), args.file)
+        if shown["binary"]:
+            print(f"{shown['path']}: binary file, {shown['size']} bytes", file=sys.stderr)
+            return 1
+        print(shown["text"], end="" if shown["text"].endswith("\n") else "\n")
+        if shown["truncated"]:
+            print(f"… truncated at {len(shown['text'])} of {shown['size']} bytes", file=sys.stderr)
+        return 0
     if args.json:
         print(json.dumps(data, indent=2, default=str))
         return 0
@@ -176,11 +190,10 @@ def _inspect(home: Path, args) -> int:
     print(f"  author: {manifest['author'] or 'unknown'} · license: {manifest['license'] or 'unspecified'}")
     print(f"  {len(data['files'])} files · {data['bytes'] / 1024:.0f} KB · target profile: {data['name']}")
     contents = manifest["contents"]
-    print(f"  identity: {'SOUL.md' if contents['soul'] else 'none'} · skills: {len(contents['skills'])}"
+    skill_count = len((data.get("readable") or {}).get("skills") or []) or len(contents["skills"])
+    print(f"  identity: {'SOUL.md' if contents['soul'] else 'none'} · skills: {skill_count}"
           f" · routines: {len(contents['cron'])} · mcp: {len(contents['mcp'])} · memories: "
           f"{'included' if contents['memories'] else 'no'}")
-    if contents["skills"]:
-        print(f"  skills: {', '.join(contents['skills'])}")
     if contents["cron"]:
         print("  routines: " + ", ".join(contents["cron"]))
     if contents["plugins"]:
@@ -188,9 +201,37 @@ def _inspect(home: Path, args) -> int:
     for item in data["env_requires"]:
         mark = "✓" if item["set"] or item["in_env_file"] else "·"
         print(f"  {mark} {item['name']} — {item['description'] or 'required'}")
+    _print_will_run(data)
     for warning in data["warnings"]:
         print(f"  ! {warning}")
     return 0
+
+
+def _print_will_run(data: dict) -> None:
+    """What the bundle would run, printed before the user is asked anything."""
+    readable = data.get("readable") or {}
+    soul = readable.get("soul")
+    if soul and soul.get("text"):
+        lines = soul["text"].strip().splitlines()
+        print("  SOUL.md:")
+        for line in lines[:12]:
+            print(f"    | {line}")
+        if len(lines) > 12 or soul.get("truncated"):
+            print(f"    | … ({len(lines)} lines — read it all with: hermes template inspect <source> --file SOUL.md)")
+    for skill in readable.get("skills") or []:
+        print(f"  skill {skill['name']}: {skill['description'] or '(no description)'}")
+    plan = data.get("will_run") or {}
+    for server in plan.get("mcp") or []:
+        print(f"  MCP {server['name']} (arrives disabled) would run: {server['line']}")
+    for routine in plan.get("routines") or []:
+        state = "shipped ENABLED, arrives paused" if routine["ships_enabled"] else "arrives paused"
+        print(f"  routine {routine['name']} [{routine['schedule']}] ({state})")
+        if routine.get("script"):
+            print(f"    script: {routine['script']}")
+        if routine.get("prompt"):
+            print(f"    prompt: {routine['prompt']}")
+    for item in plan.get("risky") or []:
+        print(f"  ! sets {item['key']}: {item['why']}")
 
 
 def _install(home: Path, args) -> int:
@@ -201,8 +242,12 @@ def _install(home: Path, args) -> int:
         if manifest["description"]:
             print(f"  {manifest['description']}")
         print(f"  → profile {preview['name']!r} at {preview['target_path']}")
+        _print_will_run(preview)
         for warning in preview["warnings"]:
             print(f"  ! {warning}")
+        if preview.get("plugins_available") and not args.no_enable_plugins:
+            print(f"  plugins that will be enabled (already installed here): {', '.join(preview['plugins_available'])}"
+                  " — pass --no-enable-plugins to keep them off")
     if not args.yes:
         if not sys.stdin.isatty():
             print("✗ refusing to install without confirmation (pass -y in a script)", file=sys.stderr)

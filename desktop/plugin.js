@@ -610,6 +610,169 @@ function ShareTab({ profiles, onCreated }) {
 
 // ---------------------------------------------------------------- Install
 
+// ---------------------------------------------------------------- Preview: read before installing
+
+const MONO = 'var(--ui-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)'
+
+function Section({ title, hint, children }) {
+  return jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } }, [
+    jsxs('div', { key: 'h', style: { display: 'flex', alignItems: 'baseline', gap: 8 } }, [
+      jsx('div', { key: 't', style: S.label }, title),
+      hint ? jsx('div', { key: 'n', style: { fontSize: 11, color: T.faint } }, hint) : null
+    ]),
+    children
+  ])
+}
+
+function TextBlock({ text, maxHeight = 260 }) {
+  return jsx('pre', {
+    style: {
+      margin: 0, padding: '10px 12px', borderRadius: 8, border: `1px solid ${T.border}`,
+      background: T.raised, color: T.text, fontFamily: MONO, fontSize: 12, lineHeight: 1.55,
+      whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflow: 'auto', maxHeight
+    }
+  }, text)
+}
+
+function LinkButton({ onClick, children }) {
+  return jsx('button', {
+    type: 'button', onClick,
+    style: {
+      appearance: 'none', border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
+      color: T.accent, fontSize: 11.5, fontFamily: 'inherit', textAlign: 'left'
+    }
+  }, children)
+}
+
+// Everything a person should read before answering "install": the identity text itself,
+// each skill's own description, every routine's schedule and prompt, every MCP command,
+// the settings that change behaviour, and any file of the bundle on demand.
+function PreviewDetails({ preview }) {
+  const readable = preview.readable || { soul: null, skills: [], files: [], memories: [] }
+  const plan = preview.will_run || { mcp: [], routines: [], risky: [] }
+  const [viewing, setViewing] = useState(null)
+  const [viewError, setViewError] = useState('')
+  const [showFiles, setShowFiles] = useState(false)
+
+  const open = async (path) => {
+    setViewError('')
+    try {
+      const data = await rest('/bundle-file', { method: 'POST', body: { bundle: preview.source, path } })
+      setViewing(data)
+      // The viewer sits under the list; bring it to the reader instead of making them hunt for it.
+      setTimeout(() => {
+        const node = document.querySelector('[data-ht-viewer]')
+        if (node && node.scrollIntoView) node.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }, 30)
+    } catch (e) {
+      setViewError(errText(e))
+    }
+  }
+
+  useEffect(() => { setViewing(null); setViewError(''); setShowFiles(false) }, [preview.source])
+
+  const soul = readable.soul
+  return jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } }, [
+    soul
+      ? jsx(Section, {
+          key: 'soul', title: 'Identity — SOUL.md',
+          hint: 'Active from the first message. Read it.'
+        }, jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } }, [
+          jsx(TextBlock, { key: 't', text: soul.text || '(empty)' }),
+          soul.truncated
+            ? jsx(LinkButton, { key: 'm', onClick: () => open('SOUL.md') }, `Show all ${bytes(soul.bytes)}`)
+            : null
+        ]))
+      : jsx(Notice, { key: 'nosoul' }, 'No SOUL.md: this template keeps the default identity.'),
+
+    readable.skills.length
+      ? jsx(Section, { key: 'skills', title: plural(readable.skills.length, 'skill') },
+          jsx('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+            readable.skills.map((skill) => jsxs('div', {
+              key: skill.path, style: { display: 'flex', flexDirection: 'column', gap: 2 }
+            }, [
+              jsxs('div', { key: 'n', style: { display: 'flex', gap: 8, alignItems: 'baseline' } }, [
+                jsx('code', { key: 'c', style: { fontFamily: MONO, fontSize: 12, color: T.text } }, skill.name),
+                jsx(LinkButton, { key: 'o', onClick: () => open(skill.path) }, 'Read')
+              ]),
+              jsx('div', { key: 'd', style: { fontSize: 11.5, color: T.dim, lineHeight: 1.5 } },
+                skill.description || 'No description.')
+            ]))))
+      : null,
+
+    plan.routines.length
+      ? jsx(Section, {
+          key: 'routines', title: plural(plan.routines.length, 'routine'),
+          hint: 'All arrive paused. Enable them yourself in hermes cron.'
+        }, jsx('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+          plan.routines.map((routine) => jsxs('div', {
+            key: routine.id,
+            style: { display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 10, borderLeft: `2px solid ${T.border}` }
+          }, [
+            jsxs('div', { key: 'h', style: { display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' } }, [
+              jsx('span', { key: 'n', style: { fontSize: 12.5, fontWeight: 550 } }, routine.name),
+              jsx('code', { key: 's', style: { fontFamily: MONO, fontSize: 11, color: T.dim } }, routine.schedule || 'no schedule'),
+              routine.ships_enabled ? jsx(Chip, { key: 'e', tone: 'warn' }, 'shipped enabled → paused') : null
+            ]),
+            routine.script
+              ? jsx('div', { key: 'sc', style: { fontSize: 11.5, color: T.warn } }, ['Runs a script: ', jsx('code', { key: 'c', style: { fontFamily: MONO } }, routine.script)])
+              : null,
+            routine.prompt ? jsx(TextBlock, { key: 'p', text: routine.prompt, maxHeight: 120 }) : null
+          ]))))
+      : null,
+
+    plan.mcp.length
+      ? jsx(Section, {
+          key: 'mcp', title: plural(plan.mcp.length, 'MCP server'),
+          hint: 'Arrive disabled. Each one runs this command once you enable it.'
+        }, jsx('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+          plan.mcp.map((server) => jsxs('div', { key: server.name, style: { display: 'flex', flexDirection: 'column', gap: 2 } }, [
+            jsxs('div', { key: 'n', style: { display: 'flex', gap: 8, alignItems: 'baseline' } }, [
+              jsx('span', { key: 'n', style: { fontSize: 12.5, fontWeight: 550 } }, server.name),
+              jsx('span', { key: 's', style: { fontSize: 11, color: T.faint } }, `from ${server.source}`)
+            ]),
+            jsx(TextBlock, { key: 'l', text: server.line || '(no command)', maxHeight: 80 })
+          ]))))
+      : null,
+
+    plan.risky.length
+      ? jsx(Section, { key: 'risky', title: 'Settings that change behaviour' },
+          jsx('div', { style: { display: 'flex', flexDirection: 'column' } },
+            plan.risky.map((item) => jsx(Notice, { key: item.key, tone: 'warn' }, [
+              jsx('code', { key: 'k', style: { fontFamily: MONO } }, item.key), ` — ${item.why}`
+            ]))))
+      : null,
+
+    preview.plugins_available && preview.plugins_available.length
+      ? jsx(Notice, { key: 'plugins' },
+          `Installing also enables ${preview.plugins_available.join(', ')} (already installed on this machine).`)
+      : null,
+
+    jsx(Section, { key: 'files', title: plural(readable.files.length, 'file') },
+      jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } }, [
+        jsx(LinkButton, { key: 't', onClick: () => setShowFiles(!showFiles) }, showFiles ? 'Hide the file list' : 'Show every file'),
+        showFiles
+          ? jsx('div', { key: 'l', style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+              readable.files.map((file) => jsxs('div', { key: file.path, style: { display: 'flex', gap: 8, alignItems: 'baseline' } }, [
+                jsx(LinkButton, { key: 'p', onClick: () => open(file.path) }, file.path),
+                jsx('span', { key: 's', style: { fontSize: 11, color: T.faint } }, bytes(file.size))
+              ])))
+          : null
+      ])),
+
+    viewError ? jsx(Notice, { key: 've', tone: 'bad' }, viewError) : null,
+    viewing
+      ? jsx(Section, { key: 'viewer', title: viewing.path, hint: viewing.truncated ? `first ${bytes(200000)} of ${bytes(viewing.size)}` : bytes(viewing.size) },
+          jsxs('div', { 'data-ht-viewer': '', style: { display: 'flex', flexDirection: 'column', gap: 4 } }, [
+            viewing.binary
+              ? jsx(Notice, { key: 'b' }, 'Binary file — not shown.')
+              : jsx(TextBlock, { key: 't', text: viewing.text, maxHeight: 420 }),
+            jsx(LinkButton, { key: 'c', onClick: () => setViewing(null) }, 'Close')
+          ]))
+      : null
+  ])
+}
+
 function installLabel(preview, target) {
   if (!preview.exists || target !== preview.name) return 'Install'
   const u = preview.update
@@ -764,29 +927,7 @@ function InstallTab() {
         manifest.description
           ? jsx('div', { key: 'd', style: { fontSize: 12.5, color: T.dim, lineHeight: 1.55 } }, manifest.description)
           : null,
-        jsx('div', {
-          key: 'chips',
-          children: [
-            manifest.contents.soul ? jsx(Chip, { key: 's', tone: 'ok' }, 'SOUL.md') : null,
-            manifest.contents.skills.length ? jsx(Chip, { key: 'sk' }, plural(manifest.contents.skills.length, 'skill')) : null,
-            manifest.contents.cron.length ? jsx(Chip, { key: 'c' }, plural(manifest.contents.cron.length, 'routine')) : null,
-            manifest.contents.mcp.length ? jsx(Chip, { key: 'm' }, plural(manifest.contents.mcp.length, 'server')) : null,
-            manifest.contents.plugins.length ? jsx(Chip, { key: 'p' }, plural(manifest.contents.plugins.length, 'plugin')) : null,
-            manifest.contents.memories ? jsx(Chip, { key: 'mem', tone: 'warn' }, 'memories') : null
-          ].filter(Boolean)
-        }),
-        manifest.contents.skills.length
-          ? jsxs('div', { key: 'sk', style: { fontSize: 11.5, color: T.dim, lineHeight: 1.6 } }, [
-              jsx('span', { key: 'l', style: { color: T.faint } }, 'Skills: '),
-              manifest.contents.skills.join(', ')
-            ])
-          : null,
-        manifest.contents.cron.length
-          ? jsxs('div', { key: 'cr', style: { fontSize: 11.5, color: T.dim, lineHeight: 1.6 } }, [
-              jsx('span', { key: 'l', style: { color: T.faint } }, 'Routines (paused): '),
-              manifest.contents.cron.join(', ')
-            ])
-          : null,
+        jsx(PreviewDetails, { key: 'details', preview }),
         preview.env_requires.length
           ? jsxs('div', { key: 'env', style: { display: 'flex', flexDirection: 'column', gap: 3 } }, [
               jsx('div', { key: 'l', style: S.label }, 'Keys to reconnect'),

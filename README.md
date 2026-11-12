@@ -26,9 +26,9 @@ to *someone else*, and a template is built for that.
 | What it packs | The whole directory: `workspace/`, `logs/`, `sessions/`, `memories/`, `state.db`, caches, plugin copies | A recipe: `SOUL.md`, config, skills, routines, MCP definitions, plugin ids. Memories only if you opt in |
 | Size / speed (measured, below) | 21.8 MB in 36 s for a small profile; no result after 6 min on a 12 GB profile | 0.29 MB in 0.7 s on the same small profile; 0.30 MB in 0.6 s on the 12 GB one |
 | Private data in the file | Conversation history, memories, logs, workspace files (957 of 1,569 paths in the measured export) | None: refused by path rule at any depth, text redacted, config stripped of accounts and endpoints |
-| Before you install | Nothing: `import` extracts it | `inspect` / the Install tab shows exactly what it carries, what it needs and what is missing |
+| Before you install | Nothing: `import` extracts it | The Install tab and `inspect` show the template itself: the full `SOUL.md`, each skill's description (and any file, one click), every routine's schedule and prompt, every MCP command, and what is missing |
 | Safety on install | Safe extraction (no path escapes, no links), but takes whatever the archive holds | Same extraction guarantees, plus: refuses credential paths, zip bombs and unknown top-level entries; every file must match its SHA-256 |
-| Routines | Come over as they were | Always arrive **paused** |
+| Routines and MCP | Come over as they were | Routines arrive **paused** through Hermes' cron import; MCP servers arrive **disabled** |
 | Plugins | Copied inside the archive | Only ids; enabled only if already installed on the target |
 | Keys to reconnect | You find out when it fails | Listed in the preview, with the exact `config set` command after install |
 | Install from a link | No: a local file only | Yes: `hermes template install https://…` or paste it in the Install tab |
@@ -123,8 +123,9 @@ once, or it stays hidden.
   when you press Publish — the GitHub REST API to upload the bundle and download
   it back to prove the link. Nothing is fetched at startup, on a timer or in the
   background; no telemetry, no update check, no third-party service.
-- **No shell**: nothing is executed on behalf of a bundle. Skills, `SOUL.md` and
-  routines land as files, and routines are written paused.
+- **No shell**: nothing is executed on behalf of a bundle. Skills and `SOUL.md`
+  land as files; routines are imported paused through Hermes' own cron API
+  (`import_job_definitions`); MCP servers are written `disabled: true`.
 - The page talks to its own backend (`/api/plugins/hermes-templates`), behind the
   gateway's normal authentication. It may read a bundle only from `$HERMES_HOME`
   or your home directory; the CLI has no such limit.
@@ -134,8 +135,8 @@ once, or it stays hidden.
 ```bash
 hermes template list
 hermes template create <profile> [--out out.htemplate] [--with-memories] [--skill NAME]…
-hermes template inspect <file-or-https-link>
-hermes template install <file-or-https-link> [--name NAME] [--force] [-y]
+hermes template inspect <file-or-https-link> [--file SOUL.md]
+hermes template install <file-or-https-link> [--name NAME] [--force] [--no-enable-plugins] [-y]
 hermes template publish <file.htemplate> [--repo owner/name] [--create-repo] [-y]
 ```
 
@@ -177,10 +178,19 @@ click" path.
 - **Install side** — the archive is inspected without extracting: no absolute
   paths, no `..`, no symlinks, ≤ 2000 files, ≤ 120 MB unpacked, compression-ratio
   guard against zip bombs, only known top-level entries, and every file must
-  match its SHA-256 in `template.yaml`. A refused bundle leaves nothing behind.
-- **After install** — routines are paused, plugins are only enabled when they
-  exist here, `.env.EXAMPLE` lists the keys to reconnect, and a profile that was
-  not created from a template is never overwritten.
+  match its SHA-256 in `template.yaml`, checked on the extracted bytes before the
+  installer touches them. A refused bundle leaves nothing behind.
+- **Enforced on the way in, not trusted from the packer** — a bundle can be
+  assembled by hand, so the installer redoes the work: the config is sanitized
+  again (endpoint, account, keys removed), routines go through Hermes'
+  `import_job_definitions` and arrive paused with a reason, MCP servers arrive
+  disabled (`enabled: false` in `config.yaml`'s `mcp_servers`, the flag Hermes honours).
+  `tests/test_install_enforces.py` installs hostile bundles to prove it.
+- **After install** — plugins already installed on this machine are enabled
+  (`--no-enable-plugins` keeps them off) and the rest are listed as missing;
+  `.env.EXAMPLE` lists the keys to reconnect; a profile that was not created from
+  a template is never overwritten. Key presence is read from the target profile's
+  own credential scope, never by opening a `.env`.
 - **Publish side** — the bundle is re-verified right before the upload, the plan is
   read-only, a repository is never created without an explicit yes, a private
   repository is refused (nobody could open the link), and the token travels only
@@ -202,6 +212,7 @@ click" path.
 | `POST /download/<id>` | the bundle as base64 (the page builds a Blob) |
 | `POST /create` | pack a profile |
 | `POST /preview` | inspect a link, a path, or uploaded bytes |
+| `POST /bundle-file` | one file of a previewed bundle, as text (capped at 200 KB) |
 | `POST /install` | install after a preview |
 | `POST /publish/plan` | read-only: what publishing this template would write, and where |
 | `POST /publish` | upload, prove the link, remember it next to the template |
@@ -212,7 +223,7 @@ directory; the CLI has no such limit (the person typing owns the file).
 ## Tests
 
 ```bash
-python -m pytest -q tests/          # 58 tests
+python -m pytest -q tests/          # 77 tests
 hermes plugins validate .
 node --check desktop/plugin.js
 ```

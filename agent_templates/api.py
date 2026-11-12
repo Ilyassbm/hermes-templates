@@ -127,6 +127,17 @@ def apply(
     return install(home, bundle, name=name, force=force, enable_plugins=enable_plugins, source_url=link)
 
 
+def view_file(home: Path, bundle_path: str, member: str) -> dict:
+    """One file of a previewed bundle, as text. The page may only name a bundle under
+    the Hermes home or the user's home — the same rule as every other page read."""
+    from .peek import view
+
+    path = Path(str(bundle_path or "")).expanduser()
+    if not path.is_file() or not _allowed_path(home)(path):
+        raise TemplateError("that bundle is not readable from here")
+    return view(open_bundle(path), member)
+
+
 def library(home: Path) -> list[dict]:
     return store.library(home)
 

@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.3.0 — read before you install, enforce on the way in
+
+**The preview shows the template, not counts.** Install → Preview now displays:
+
+- the full text of `SOUL.md` ;
+- each skill with its own description and a **Read** button (grouped `skills/<category>/<name>` skills are listed too) ;
+- every routine with its schedule, prompt and script ;
+- every MCP server — from `config.yaml` (`mcp_servers`, what Hermes starts) and from `mcp.json` — with the exact command line or URL ;
+- the settings that change what the agent may do (`approvals`, `hooks`, `quick_commands`, `terminal`, `tools`, a model `base_url`) ;
+- the plugins that installing will enable ;
+- every file of the bundle, each one openable.
+
+New route `POST /bundle-file`. The CLI does the same: `hermes template inspect` prints the same plan, and `--file SOUL.md` prints one file in full.
+
+**The installer enforces what the packer promises, on bundles nobody packed:**
+
+- Routines go through Hermes' own `cron.job_definition.import_job_definitions` (the call `hermes profile install` uses). They arrive paused with a reason attached; `jobs.json` is never written by hand. An update keeps the user's scheduler state and never deletes their cron store.
+- The shipped `config.yaml` is sanitized again on install: provider kept, endpoint, account and keys removed.
+- MCP servers arrive off: `enabled: false` under `mcp_servers` in `config.yaml` (the flag Hermes honours) and in `mcp.json`.
+- A bundle with routines refuses to install outside a Hermes runtime instead of dropping them silently.
+- The checksum index is checked on the extracted bytes *before* the installer rewrites anything.
+- A failed routine import rolls back a fresh install.
+
+**Core helpers instead of private copies:**
+
+- The tombstone is cleared with `hermes_constants.clear_named_profile_deleted`.
+- Key presence comes from the target profile's own credential scope (`build_profile_secret_scope`). The installer never opens a `.env`, reads no `os.environ`, and a profile that does not exist yet has no keys.
+
+**Wording.** The plugin enables plugins *already installed on the machine* unless you pass `--no-enable-plugins`; the docs no longer claim "never auto-enabled".
+
+77 tests (70 without a Hermes install, 7 skipped), including a set of hand-assembled hostile bundles (`tests/test_install_enforces.py`).
+
 ## 1.2.4 — catalog-clean
 
 - The settings value is read through the plugin context (`ctx.get_config`), bound at

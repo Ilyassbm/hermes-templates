@@ -25,6 +25,18 @@ from agent_templates.profiles import list_profiles  # noqa: E402
 SECRET = "sk-abcdefghijklmnopqrstuvwxyz0123456789"
 
 
+
+def _has_cron_api() -> bool:
+    try:
+        import cron.job_definition  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+#: Installing a bundle that ships routines goes through Hermes' cron API.
+needs_cron = pytest.mark.skipif(not _has_cron_api(), reason="routines are imported through Hermes' cron API")
+
 @pytest.fixture()
 def home(tmp_path: Path) -> Path:
     root = tmp_path / "home"
@@ -156,6 +168,7 @@ def test_mcp_env_values_become_required_keys(home: Path):
 
 
 def test_install_roundtrip(home: Path):
+    cron = pytest.importorskip("cron.jobs")  # the fixture ships a routine: needs Hermes' cron API
     result = build(home, "testbot")
     bundle = open_bundle(result.path)
     installed = api.apply(home, str(result.path), name="copybot")
@@ -169,8 +182,9 @@ def test_install_roundtrip(home: Path):
     assert not (profile / ".env").exists()
     assert "OPENAI_API_KEY" not in (profile / ".env.EXAMPLE").read_text().split("=")[0]
 
-    jobs = json.loads((profile / "cron" / "jobs.json").read_text())["jobs"]
-    assert jobs[0]["enabled"] is False
+    with cron.use_cron_store(profile):
+        jobs = cron.load_jobs()
+    assert jobs and all(job["enabled"] is False for job in jobs)
 
     config = (profile / "config.yaml").read_text()
     assert "hermes-ui" in config
@@ -233,6 +247,7 @@ def test_install_refuses_wrong_schema(home: Path, tmp_path: Path):
         open_bundle(bad)
 
 
+@needs_cron
 def test_name_collision_is_refused_then_forced(home: Path):
     result = build(home, "testbot")
     api.apply(home, str(result.path), name="copybot")
@@ -256,12 +271,31 @@ def test_install_never_overwrites_a_hand_made_profile(home: Path):
 
 def test_preview_reports_env_and_plugins(home: Path, monkeypatch):
     result = build(home, "testbot")
-    monkeypatch.setenv("SEARCH_API_KEY", "set")
+    # A key in the process environment is not a key of the target profile: under a gateway
+    # serving several profiles it can belong to another one. Only the profile's own scope counts.
+    monkeypatch.setenv("SEARCH_API_KEY", "from-the-process")
     data = api.inspect(home, str(result.path))
     assert data["name"] == "testbot"
-    assert data["env_requires"][0]["set"] is True
+    assert data["env_requires"][0]["set"] is False
     assert data["plugins_missing"] == ["not-installed-here"]
     assert any("paused" in w for w in data["warnings"])
+
+
+def test_a_key_counts_when_the_target_profile_has_it(home: Path, monkeypatch):
+    pytest.importorskip("agent.secret_scope")
+    monkeypatch.delenv("SEARCH_API_KEY", raising=False)
+    result = build(home, "testbot")
+    (home / "profiles" / "testbot" / ".env").write_text("SEARCH_API_KEY=value-of-this-profile\n", encoding="utf-8")
+    data = api.inspect(home, str(result.path))
+    assert data["env_requires"][0]["set"] is True
+
+
+def test_a_new_profile_has_no_keys_even_if_the_root_does(home: Path, monkeypatch):
+    monkeypatch.delenv("SEARCH_API_KEY", raising=False)
+    (home / ".env").write_text("SEARCH_API_KEY=root-value\n", encoding="utf-8")
+    result = build(home, "testbot")
+    data = api.inspect(home, str(result.path), name="brand-new")
+    assert data["env_requires"][0]["set"] is False
 
 
 def test_library_and_file_roundtrip(home: Path):
@@ -282,6 +316,7 @@ def test_zip_bomb_ratio_is_refused(home: Path, tmp_path: Path):
         open_bundle(bomb)
 
 
+@needs_cron
 def test_install_clears_a_deleted_profile_tombstone(home: Path):
     result = build(home, "testbot")
     api.apply(home, str(result.path), name="copybot")
@@ -292,6 +327,7 @@ def test_install_clears_a_deleted_profile_tombstone(home: Path):
     assert not (home / "profiles" / ".deleted" / "copybot").exists()
 
 
+@needs_cron
 def test_install_returns_the_keys_to_connect(home: Path):
     result = build(home, "testbot")
     installed = api.apply(home, str(result.path), name="copybot")

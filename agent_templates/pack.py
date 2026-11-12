@@ -401,7 +401,9 @@ def _readme(manifest: dict) -> str:
         "```",
         "",
         "Or open Hermes Desktop → Templates → Install, paste the link and review the",
-        "preview. Routines arrive paused and plugins are never auto-enabled.",
+        "preview: it shows SOUL.md, the skills, every routine and every MCP command. Routines",
+        "arrive paused and MCP servers disabled; plugins already installed on the machine are",
+        "enabled unless you pass `--no-enable-plugins`.",
         "",
     ]
     if manifest["env_requires"]:

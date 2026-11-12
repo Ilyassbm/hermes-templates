@@ -22,7 +22,9 @@ from pathlib import Path
 from .errors import InvalidBundle, ProfileExists, TemplateError, UnsafeBundle
 from .manifest import normalize, verify_index
 from .netsafe import open_url
+from .peek import readable
 from .profiles import layout, plugins_dirs
+from .runtime_plan import import_routines, runtime_plan, shipped_routines
 from .safety import (
     MAX_BUNDLE_BYTES,
     MAX_COMPRESSION_RATIO,
@@ -31,6 +33,7 @@ from .safety import (
     ensure_safe,
     forbidden_reason,
     normalize_rel,
+    sanitize_config,
     validate_profile_name,
 )
 from .yamlio import dump_yaml, load_yaml
@@ -38,6 +41,7 @@ from .yamlio import dump_yaml, load_yaml
 ALLOWED_ROOT_FILES = frozenset({"template.yaml", "SOUL.md", "config.yaml", "mcp.json", "README.md"})
 ALLOWED_ROOT_DIRS = frozenset({"skills", "cron", "memories"})
 MARKER = ".hermes-template.json"
+CRON_STORE = "cron/jobs.json"
 
 
 @dataclass
@@ -234,9 +238,11 @@ def preview(home: Path, bundle: Bundle, *, name: str = "", source_url: str = "")
     for item in bundle.manifest["env_requires"]:
         env.append({
             **item,
-            "set": bool(os.environ.get(item["name"])),
-            "in_env_file": _env_has(home, target_name, item["name"]),
+            "set": key_is_set(home, target_name, item["name"]),
+            "in_env_file": key_is_set(home, target_name, item["name"]),
         })
+
+    plan = runtime_plan(bundle)
 
     available, missing = _split_plugins(home, bundle.manifest["contents"]["plugins"])
 
@@ -245,6 +251,14 @@ def preview(home: Path, bundle: Bundle, *, name: str = "", source_url: str = "")
         warnings.append("This template ships memories written by its author — read them before chatting.")
     if bundle.manifest["contents"]["cron"]:
         warnings.append("Routines arrive paused: enable the ones you want in `hermes cron list`.")
+    if plan["mcp"]:
+        names = ", ".join(server["name"] for server in plan["mcp"])
+        warnings.append(
+            f"MCP servers arrive disabled ({names}); each runs a command once enabled — read it above first."
+        )
+    if plan["risky"]:
+        keys = ", ".join(f"`{item['key']}`" for item in plan["risky"])
+        warnings.append(f"This bundle sets {keys}, which change what the agent may do — check them before chatting.")
     if bundle.manifest["contents"]["soul"]:
         warnings.append("SOUL.md is active as soon as you start chatting: read it first.")
     if missing:
@@ -279,6 +293,8 @@ def preview(home: Path, bundle: Bundle, *, name: str = "", source_url: str = "")
         "plugins_available": available,
         "plugins_missing": missing,
         "warnings": warnings,
+        "will_run": plan,
+        "readable": readable(bundle),
         "target_path": str(target),
         "exists": exists,
         "replaceable": replaceable,
@@ -322,22 +338,40 @@ def install(
     # A profile deleted earlier leaves a tombstone in ``profiles/.deleted/`` that makes
     # Hermes treat a directory of that name as gone. Installing is an explicit "this
     # name again", so the tombstone goes first — otherwise the profile is written and
-    # then invisible to every `-p` invocation.
-    (profiles_dir / ".deleted" / target_name).unlink(missing_ok=True)
+    # then invisible to every `-p` invocation. Core owns that file's name and shape.
+    clear_profile_tombstone(target)
     staging = Path(tempfile.mkdtemp(prefix=f".htemplate-{target_name}-", dir=profiles_dir))
 
     try:
         _extract(bundle, staging)
-        _prepare_profile(staging, bundle.manifest, target_name, enable_plugins, home, source_url)
-
-        problems = verify_index(staging, bundle.manifest["files"])
+        # Check the bytes exactly as extracted, before the installer rewrites config.yaml
+        # (sanitized) and mcp.json (servers disabled). cron/jobs.json is not extracted at all:
+        # it goes through Hermes' cron import below.
+        written = {rel: digest for rel, digest in bundle.manifest["files"].items() if rel != CRON_STORE}
+        problems = verify_index(staging, written)
         if problems:
             raise InvalidBundle("installed files failed verification: " + "; ".join(problems[:5]))
+
+        _prepare_profile(staging, bundle.manifest, target_name, enable_plugins, home, source_url)
 
         if exists:
             _replace_template_files(target, staging)
         else:
             staging.rename(target)
+
+        # Routines never land as a hand-written jobs.json: the shipped records go through
+        # Hermes' own cron import, so unknown ids arrive paused with a reason attached.
+        routines = shipped_routines(bundle)
+        if routines:
+            try:
+                import_routines(
+                    target, routines,
+                    reason=f"Installed from the template {bundle.manifest['name']!r}; review it, then enable what you want.",
+                )
+            except Exception:
+                if not exists:  # a fresh install leaves nothing half-written behind
+                    shutil.rmtree(target, ignore_errors=True)
+                raise
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -374,6 +408,10 @@ def _extract(bundle: Bundle, dest: Path) -> None:
             if info.is_dir():
                 continue
             rel = ensure_safe(info.filename)
+            if rel.as_posix() == CRON_STORE:
+                # Scheduler state is not a file to copy: it is imported through the cron API
+                # (see install()), which pauses what the author shipped.
+                continue
             target = dest.joinpath(*rel.parts)
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as source, open(target, "wb") as handle:
@@ -392,6 +430,15 @@ def _prepare_profile(
             config = {}
     if not isinstance(config, dict):
         config = {}
+    # Same pass the packer runs, applied again on the way in: a bundle assembled by hand
+    # can carry accounts, endpoints and keys the packer would have removed.
+    config, _dropped = sanitize_config(config)
+    # MCP servers are commands that start on the first chat. Hermes skips a server whose
+    # ``enabled`` is false, so every one the bundle declares arrives off.
+    if isinstance(config.get("mcp_servers"), dict):
+        for spec in config["mcp_servers"].values():
+            if isinstance(spec, dict):
+                spec["enabled"] = False
 
     if enable_plugins and manifest["contents"]["plugins"]:
         available, _ = _split_plugins(home, manifest["contents"]["plugins"])
@@ -405,6 +452,22 @@ def _prepare_profile(
             config["plugins"] = plugins
 
     config_path.write_text(dump_yaml(config), encoding="utf-8")
+
+    # An MCP server is a command that runs on the first chat. It arrives disabled, and the
+    # preview shows the exact command line, so enabling it is a decision, not a surprise.
+    mcp_path = staging / "mcp.json"
+    if mcp_path.is_file():
+        try:
+            data = json.loads(mcp_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        servers = data.get("mcpServers") if isinstance(data, dict) else None
+        if isinstance(servers, dict) and servers:
+            for spec in servers.values():
+                if isinstance(spec, dict):
+                    spec["disabled"] = True
+                    spec["enabled"] = False
+            mcp_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     profile_meta = {"description": manifest["description"] or manifest["title"], "description_auto": False}
     (staging / "profile.yaml").write_text(dump_yaml(profile_meta), encoding="utf-8")
@@ -439,6 +502,8 @@ def _replace_template_files(target: Path, staging: Path) -> None:
     except Exception:
         previous = []
     for rel in previous:
+        if str(rel).replace("\\", "/") == CRON_STORE:
+            continue  # the user's scheduler state, never a template file
         try:
             path = target.joinpath(*normalize_rel(str(rel)).parts)
         except UnsafeBundle:
@@ -455,19 +520,45 @@ def _replace_template_files(target: Path, staging: Path) -> None:
     shutil.rmtree(staging, ignore_errors=True)
 
 
-def _env_has(home: Path, profile: str, key: str) -> bool:
-    for candidate in (Path(home) / ".env", Path(home) / "profiles" / profile / ".env"):
-        try:
-            text = candidate.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("#") or "=" not in stripped:
-                continue
-            if stripped.split("=", 1)[0].strip() == key:
-                return True
-    return False
+def clear_profile_tombstone(target: Path) -> None:
+    """Remove the tombstone that makes Hermes treat this profile name as deleted."""
+    try:
+        from hermes_constants import clear_named_profile_deleted
+
+        clear_named_profile_deleted(target)
+    except ImportError:  # outside a Hermes runtime
+        target.parent.joinpath(".deleted", target.name).unlink(missing_ok=True)
+
+
+def key_is_set(home: Path, profile: str, key: str) -> bool:
+    """Whether *key* resolves for this profile, through Hermes' credential scope.
+
+    Never opens a ``.env`` itself: the profile's scope, built by the same helper
+    Hermes' dashboard routes use, is the only truthful answer, and it cannot see
+    another profile's value. No ``os.environ`` fallback for the same reason.
+    """
+    target = layout(home).profiles_dir / profile
+    if not target.is_dir():
+        return False  # a profile that does not exist yet has no keys: profiles are islands
+    try:
+        from agent.secret_scope import (
+            build_profile_secret_scope,
+            get_secret,
+            reset_secret_scope,
+            set_secret_scope,
+        )
+    except ImportError:  # outside a Hermes runtime: nothing to read, so not set
+        return False
+    try:
+        token = set_secret_scope(build_profile_secret_scope(target), profile_home=str(target))
+    except Exception:  # noqa: BLE001 - an unreadable env is "not set", never a failed preview
+        return False
+    try:
+        return bool(get_secret(key))
+    except Exception:  # noqa: BLE001 - unscoped key: unknown, so not "set"
+        return False
+    finally:
+        reset_secret_scope(token)
 
 
 def _split_plugins(home: Path, plugins: list[str]) -> tuple[list[str], list[str]]:

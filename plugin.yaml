@@ -1,7 +1,7 @@
 name: hermes-templates
 label: Agent Templates
 kind: standalone
-version: 1.2.4
+version: 1.3.0
 author: Ilyass Bm
 license: MIT
 description: >
@@ -10,7 +10,10 @@ description: >
   servers, published memories and plugin ids — and `hermes template install` turns a bundle or a
   link into a new profile. Credentials, sessions, conversation history, logs and caches never
   travel; every text file is redacted with Hermes' own secret redactor before packing; install
-  always previews first, ships routines paused and never auto-enables a plugin. The Desktop app
+  always previews first and shows what will run (SOUL.md, skills, every routine's schedule and
+  prompt, every MCP command); routines arrive paused, MCP servers arrive disabled, the config is
+  sanitized again on install, and plugins already installed on this machine are enabled unless
+  you pass --no-enable-plugins. The Desktop app
   gets a Templates page with a Share tab and an Install tab (drag a bundle, or paste a link).
 requires_hermes: ">=0.23"
 config_schema:

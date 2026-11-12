@@ -148,6 +148,15 @@ async def preview(body: dict = _BODY):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/bundle-file")
+async def bundle_file(body: dict = _BODY):
+    """Read one file of a previewed bundle (text, capped), so the page can show it in full."""
+    try:
+        return api.view_file(_home(), str(body.get("bundle") or ""), str(body.get("path") or ""))
+    except TemplateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/install")
 async def install(body: dict = _BODY):
     try:
