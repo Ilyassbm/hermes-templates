@@ -259,6 +259,11 @@ def preview(home: Path, bundle: Bundle, *, name: str = "", source_url: str = "")
     if plan["risky"]:
         keys = ", ".join(f"`{item['key']}`" for item in plan["risky"])
         warnings.append(f"This bundle sets {keys}, which change what the agent may do — check them before chatting.")
+    for item in plan["policy_dropped"]:
+        warnings.append(
+            f"Removed on install: `{item['key']}: {item['value']}` — approval and consent policy never comes "
+            "from a template; this profile keeps Hermes' defaults."
+        )
     if bundle.manifest["contents"]["soul"]:
         warnings.append("SOUL.md is active as soon as you start chatting: read it first.")
     if missing:

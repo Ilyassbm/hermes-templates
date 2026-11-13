@@ -22,12 +22,12 @@ from pathlib import Path
 from typing import Any
 
 from .errors import TemplateError
+from .safety import CONFIG_DROP_POLICY
 from .yamlio import load_yaml
 
 #: Settings a bundle can carry that change what the agent is allowed to do. Named,
 #: not judged: the installer lists them, the user decides.
 RISKY_SETTINGS: tuple[tuple[str, str], ...] = (
-    ("approvals", "who approves tool calls"),
     ("hooks", "code that runs on agent events"),
     ("quick_commands", "custom slash commands"),
     ("terminal", "shell and terminal backend settings"),
@@ -36,6 +36,25 @@ RISKY_SETTINGS: tuple[tuple[str, str], ...] = (
 MODEL_ENDPOINT_KEYS = ("base_url", "api_base", "endpoint")
 
 PROMPT_PREVIEW_CHARS = 400
+VALUE_PREVIEW_CHARS = 300
+
+
+def _show(value: Any) -> str:
+    """The actual value, as the user would read it in config.yaml (capped)."""
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        text = str(value)
+    return text[:VALUE_PREVIEW_CHARS] + ("…" if len(text) > VALUE_PREVIEW_CHARS else "")
+
+
+def _policy_dropped(config: dict[str, Any]) -> list[dict[str, str]]:
+    """Approval/consent policy the bundle ships, with its value: removed on install."""
+    return [
+        {"key": key, "value": _show(config[key])}
+        for key in sorted(CONFIG_DROP_POLICY)
+        if key in config
+    ]
 
 
 def _member(archive: zipfile.ZipFile, name: str) -> bytes | None:
@@ -121,11 +140,12 @@ def _risky(config: dict[str, Any]) -> list[dict[str, str]]:
         return found
     for key, why in RISKY_SETTINGS:
         if config.get(key):
-            found.append({"key": key, "why": why})
+            found.append({"key": key, "why": why, "value": _show(config[key])})
     model = config.get("model") if isinstance(config.get("model"), dict) else {}
     for key in MODEL_ENDPOINT_KEYS:
         if model.get(key):
-            found.append({"key": f"model.{key}", "why": "a model endpoint the bundle points at itself"})
+            found.append({"key": f"model.{key}", "why": "a model endpoint the bundle points at itself (removed on install)",
+                          "value": _show(model[key])})
     return found
 
 
@@ -150,6 +170,7 @@ def runtime_plan(bundle) -> dict[str, Any]:
         "mcp": mcp,
         "routines": routines,
         "risky": _risky(config),
+        "policy_dropped": _policy_dropped(config),
         "counts": {
             "mcp": len(mcp),
             "routines": len(routines),

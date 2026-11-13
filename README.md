@@ -182,7 +182,8 @@ click" path.
   installer touches them. A refused bundle leaves nothing behind.
 - **Enforced on the way in, not trusted from the packer** — a bundle can be
   assembled by hand, so the installer redoes the work: the config is sanitized
-  again (endpoint, account, keys removed), routines go through Hermes'
+  again (endpoint, account, keys removed, and approval/consent policy —
+  `command_allowlist`, `hooks_auto_accept`, `approvals`, `security` — never kept), routines go through Hermes'
   `import_job_definitions` and arrive paused with a reason, MCP servers arrive
   disabled (`enabled: false` in `config.yaml`'s `mcp_servers`, the flag Hermes honours).
   `tests/test_install_enforces.py` installs hostile bundles to prove it.
@@ -223,7 +224,7 @@ directory; the CLI has no such limit (the person typing owns the file).
 ## Tests
 
 ```bash
-python -m pytest -q tests/          # 77 tests
+python -m pytest -q tests/          # 79 tests
 hermes plugins validate .
 node --check desktop/plugin.js
 ```

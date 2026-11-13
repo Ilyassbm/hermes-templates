@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1 — approval policy never travels
+
+- `command_allowlist`, `hooks_auto_accept`, `approvals` and `security` are dropped from a
+  template's `config.yaml` when packing **and again on install**. A bundle from a link can
+  no longer auto-approve dangerous commands (`command_allowlist: ["*"]`), skip shell-hook
+  consent (`hooks_auto_accept: true`) or loosen approval modes; the installed profile keeps
+  Hermes' defaults.
+- The preview lists what is removed with its actual value (`command_allowlist: ["*"]`), and
+  every remaining risky setting (`hooks`, `terminal`, `tools`, `quick_commands`, model
+  endpoint) now shows its value, not just its key.
+- Fix: one preview test built its bundle under the system temp dir, which the page may not
+  read; CI (clean `$HOME`) failed on it. The bundle now lives under the test's Hermes home.
+- 79 tests (72 without a Hermes install, 7 skipped).
+
 ## 1.3.0 — read before you install, enforce on the way in
 
 **The preview shows the template, not counts.** Install → Preview now displays:

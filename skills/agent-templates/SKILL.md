@@ -1,7 +1,7 @@
 ---
 name: agent-templates
 description: "Use when sharing an agent as a template or installing one from a link (.htemplate)."
-version: 1.3.0
+version: 1.3.1
 author: hermes-templates plugin
 license: MIT
 metadata:

@@ -231,6 +231,14 @@ CONFIG_DROP_SECTIONS = frozenset({
     "pairing", "relay", "telemetry",
 })
 
+# Approval and consent policy. A template arriving from a link must never decide what the
+# installer auto-approves: ``command_allowlist: ["*"]`` approves every dangerous command,
+# ``hooks_auto_accept: true`` skips shell-hook consent, ``approvals`` (mode, cron and
+# unattended modes, smart policy) and ``security`` (private URLs, protected files,
+# redaction) are the installer's own safety settings. Dropped when packing and again on
+# install, so the profile keeps Hermes' defaults until its owner changes them.
+CONFIG_DROP_POLICY = frozenset({"command_allowlist", "hooks_auto_accept", "approvals", "security"})
+
 # Keys whose value is an endpoint or an account, not a behaviour.
 CONFIG_DROP_KEYS = frozenset({"base_url", "api_mode", "api_key", "api_base", "endpoint"})
 
@@ -251,7 +259,7 @@ def sanitize_config(config: dict) -> tuple[dict, list[str]]:
         out = {}
         for key, value in node.items():
             dotted = f"{prefix}{key}"
-            if key in CONFIG_DROP_SECTIONS and not prefix:
+            if (key in CONFIG_DROP_SECTIONS or key in CONFIG_DROP_POLICY) and not prefix:
                 dropped.append(dotted)
                 continue
             if key in CONFIG_DROP_KEYS:

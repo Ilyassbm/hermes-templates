@@ -231,7 +231,7 @@ def _print_will_run(data: dict) -> None:
         if routine.get("prompt"):
             print(f"    prompt: {routine['prompt']}")
     for item in plan.get("risky") or []:
-        print(f"  ! sets {item['key']}: {item['why']}")
+        print(f"  ! sets {item['key']} = {item.get('value', '')}  ({item['why']})")
 
 
 def _install(home: Path, args) -> int:

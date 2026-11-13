@@ -739,8 +739,18 @@ function PreviewDetails({ preview }) {
       ? jsx(Section, { key: 'risky', title: 'Settings that change behaviour' },
           jsx('div', { style: { display: 'flex', flexDirection: 'column' } },
             plan.risky.map((item) => jsx(Notice, { key: item.key, tone: 'warn' }, [
-              jsx('code', { key: 'k', style: { fontFamily: MONO } }, item.key), ` — ${item.why}`
+              jsx('code', { key: 'k', style: { fontFamily: MONO } }, item.value ? `${item.key}: ${item.value}` : item.key),
+              ` — ${item.why}`
             ]))))
+      : null,
+
+    (plan.policy_dropped || []).length
+      ? jsx(Section, {
+          key: 'policy', title: 'Removed on install',
+          hint: 'Approval and consent policy never comes from a template.'
+        }, jsx('div', { style: { display: 'flex', flexDirection: 'column' } },
+          plan.policy_dropped.map((item) => jsx(Notice, { key: item.key, tone: 'warn' },
+            jsx('code', { style: { fontFamily: MONO } }, `${item.key}: ${item.value}`)))))
       : null,
 
     preview.plugins_available && preview.plugins_available.length
